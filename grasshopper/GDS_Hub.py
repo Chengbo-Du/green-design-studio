@@ -1,0 +1,5440 @@
+# -*- coding: utf-8 -*-
+# GH GhPython (IronPython 2.7) — GDS Hub Control Panel
+# Multi-module hub: Space → Enclosure → Service → HVAC → Site → Advanced (IDF)
+# Input: RUN (Button) to open UI
+# v62 - Space Module Reorganization, Quick Evaluation view
+# v63 - MODULAR: Presets imported from gds-core package
+#       Run 'pip install gds-core' before using this script
+
+# ========================= GDS-CORE IMPORTS ==================================
+# Import presets from gds-core package (single source of truth)
+try:
+    from gds import __version__ as GDS_CORE_VERSION
+    from gds.presets.schedules import SCHEDULE_PRESETS, SETPOINT_PRESETS, ACTIVITY_PRESETS
+    from gds.presets.intensities import INTENSITY_DEFAULTS, SHW_PRESETS
+    from gds.presets.hvac import (
+        HVAC_CATEGORIES, HVAC_VINTAGES, HVAC_ECONOMIZER_TYPES, HVAC_RADIANT_TYPES,
+        HVAC_QUICK_PRESETS, HVAC_BUILDING_PRESETS
+    )
+    from gds.presets.renewables import (
+        PV_PRESETS, PV_MODULE_TYPES, PV_MOUNTING_TYPES,
+        BATTERY_PRESETS, WIND_PRESETS, SOLHW_PRESETS
+    )
+    GDS_CORE_AVAILABLE = True
+except ImportError:
+    GDS_CORE_AVAILABLE = False
+    GDS_CORE_VERSION = "N/A"
+    print("WARNING: gds-core not installed. Run 'pip install gds-core' for modular presets.")
+    print("Falling back to embedded presets...")
+    
+    # ======================= FALLBACK PRESETS (if gds-core not installed) ========
+    SCHEDULE_PRESETS = {
+        "Always On": [1.0] * 24,
+        "Always Off": [0.0] * 24,
+        "Office Weekday": [0, 0, 0, 0, 0, 0, 0.1, 0.2, 0.95, 0.95, 0.95, 0.5, 0.95, 0.95, 0.95, 0.95, 0.95, 0.3, 0.1, 0.05, 0, 0, 0, 0],
+        "Office Weekend": [0, 0, 0, 0, 0, 0, 0.05, 0.05, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.05, 0.05, 0, 0, 0, 0, 0, 0, 0, 0],
+        "Retail": [0, 0, 0, 0, 0, 0, 0, 0.1, 0.2, 0.5, 0.8, 0.9, 0.9, 0.9, 0.9, 0.9, 0.9, 0.8, 0.5, 0.2, 0, 0, 0, 0],
+        "Hospital 24/7": [0.8, 0.7, 0.6, 0.6, 0.6, 0.7, 0.8, 0.9, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 0.9, 0.9, 0.9, 0.9, 0.9, 0.8, 0.8],
+        "School": [0, 0, 0, 0, 0, 0, 0.1, 0.5, 0.95, 0.95, 0.95, 0.95, 0.5, 0.95, 0.95, 0.5, 0.1, 0, 0, 0, 0, 0, 0, 0],
+        "Residential": [0.9, 0.9, 0.9, 0.9, 0.9, 0.9, 0.7, 0.4, 0.4, 0.2, 0.2, 0.2, 0.2, 0.2, 0.2, 0.3, 0.5, 0.7, 0.8, 0.9, 0.9, 0.9, 0.9, 0.9],
+    }
+    SETPOINT_PRESETS = {
+        "Office Heating": [15.6, 15.6, 15.6, 15.6, 15.6, 15.6, 18, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 15.6, 15.6, 15.6, 15.6, 15.6, 15.6],
+        "Office Cooling": [29.4, 29.4, 29.4, 29.4, 29.4, 29.4, 26, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 29.4, 29.4, 29.4, 29.4, 29.4, 29.4],
+        "Residential Heating": [18, 18, 18, 18, 18, 18, 20, 21, 21, 18, 18, 18, 18, 18, 18, 18, 21, 21, 21, 21, 21, 20, 18, 18],
+        "Residential Cooling": [28, 28, 28, 28, 28, 28, 26, 25, 25, 28, 28, 28, 28, 28, 28, 28, 25, 25, 25, 25, 25, 26, 28, 28],
+        "Constant 21C": [21] * 24,
+        "Constant 24C": [24] * 24,
+    }
+    ACTIVITY_PRESETS = {
+        "Office Seated": [120] * 24,
+        "Office Light Work": [126] * 24,
+        "Standing/Walking": [150] * 24,
+        "Light Labor": [180] * 24,
+        "Heavy Labor": [300] * 24,
+    }
+    INTENSITY_DEFAULTS = {"Office": {"people_per_area": 0.0565, "lighting_power": 10.76, "equipment_power": 10.76, "infiltration_rate": 0.0003, "ventilation_per_person": 0.006, "ventilation_per_area": 0.0003}}
+    SHW_PRESETS = {"None": {"flow_per_area": 0.0, "target_temp": 49.0, "sensible_fraction": 0.0, "latent_fraction": 0.0}}
+    HVAC_CATEGORIES = {"Ideal Air (Loads Only)": {"description": "Perfect heating/cooling", "class": "IdealAirSystem", "equipment_types": ["IdealAirSystem"], "has_economizer": True, "has_heat_recovery": True, "has_dcv": True}}
+    HVAC_VINTAGES = ["ASHRAE_2019", "ASHRAE_2016", "ASHRAE_2013"]
+    HVAC_ECONOMIZER_TYPES = ["NoEconomizer", "DifferentialDryBulb"]
+    HVAC_RADIANT_TYPES = ["Floor", "Ceiling"]
+    HVAC_QUICK_PRESETS = {}
+    HVAC_BUILDING_PRESETS = {"Ideal Air (Loads Only)": {"class": "IdealAirSystem", "equipment_type": "IdealAirSystem", "vintage": "ASHRAE_2019"}}
+    PV_PRESETS = {"Standard Silicon": {"efficiency": 0.15, "module_type": "Standard", "mounting": "FixedOpenRack", "loss_fraction": 0.14, "tracking_gcr": 0.4}}
+    PV_MODULE_TYPES = ['Standard', 'Premium', 'ThinFilm']
+    PV_MOUNTING_TYPES = ['FixedOpenRack', 'FixedRoofMounted', 'OneAxis', 'TwoAxis']
+    BATTERY_PRESETS = {"Residential Small (5 kWh)": {"capacity_kwh": 5, "power_kw": 3.8, "efficiency": 0.89}}
+    WIND_PRESETS = {"Micro Turbine (1 kW)": {"rated_power_kw": 1.0, "rotor_diameter_m": 2.5, "hub_height_m": 10}}
+    SOLHW_PRESETS = {"Flat Plate - Standard": {"efficiency": 0.50, "collector_type": "FlatPlate"}}
+# =============================================================================
+
+# --------------------------- CONFIG ------------------------------------------
+# Space Module
+NAME_SLIDER_DUP = "Dup"
+NAME_SLIDER_ACH = "Zone_ACH"
+NAME_TOGGLE     = "RUN_SIM"
+NAME_BUTTON     = "GEO_OVERWRITE"
+NAME_BREP       = "SELECTED_GEO"
+NAME_BLDS       = "Blds"
+
+NAME_PANELS_IN  = ["Building Name", "Layer to Bake&Refer", "GDS Database Path"]
+NAME_SPACE_OUTPUTS = ["Design Parameters", "Control Parameters", 
+                      "State Variables", "Interface Variables"]
+NAME_PERFORMANCE   = "Performance"
+
+# Enclosure Module
+NAME_PREVIEW_BREP  = "GDS_Preview"
+NAME_APERTURE_SRF  = "aperture surfaces"
+NAME_APERTURE_SYNC = "ap_sync"
+NAME_DOOR_SRF      = "door surfaces"
+NAME_DOOR_SYNC     = "door_sync"
+NAME_ENV_OUTPUTS   = ["GDS_Envelope_Design", "GDS_Envelope_Control",
+                      "GDS_Envelope_State", "GDS_Envelope_Interface"]
+NAME_ENV_PERF      = "GDS_Envelope_Performance"
+
+# Service Module
+NAME_HB_ROOMS_IN = "HB_Rooms"
+NAME_PROGRAM_OUTPUT = "GDS_Program"
+NAME_CUSTOM_SCHEDULES = "GDS_Custom_Schedules"
+
+# Space Module - Conditioning Status (v62)
+NAME_COND_STATUS = "GDS_Cond_Status"
+
+# Site Module
+NAME_SITE_CONTEXT  = "site_context"
+NAME_SITE_INDEX    = "site_index"
+NAME_SITE_NAME     = "site_name"
+NAME_SITE_BUTTON   = "site_overwrite"
+NAME_INC_CONTEXT   = "IncCont?"
+NAME_WEATHER_PATH  = "weather_path"
+NAME_SITE_OUTPUTS  = ["GDS_Site_Design", "GDS_Site_Control",
+                      "GDS_Site_State", "GDS_Site_Interface"]
+NAME_SITE_PERF     = "GDS_Site_Performance"
+
+# HVAC Module
+NAME_HVAC_ROOMS_IN  = "HB_Rooms"
+NAME_HVAC_ROOMS_OUT = "HB_Rooms_HVAC"
+NAME_HVAC_SYSTEM    = "HVAC_System"
+HVAC_CONFIG_KEY     = "GDS_HVAC_CONFIG"
+
+# Advanced (IDF Injection) Module
+NAME_IDF_INJECTION  = "GDS_IDF_Injection"
+
+# Window title with version
+GDS_HUB_VERSION = "v63"
+if GDS_CORE_AVAILABLE:
+    WINDOW_TITLE = "GDS Hub {} (core {})".format(GDS_HUB_VERSION, GDS_CORE_VERSION)
+else:
+    WINDOW_TITLE = "GDS Hub {} (standalone)".format(GDS_HUB_VERSION)
+
+WINDOW_SIZE     = (1050, 780)
+DUP_DEFAULT     = 2
+ACH_DEFAULT     = 0.5
+OUT_MAX_ITEMS   = 200
+HVAC_DEFAULT_KEY = "GDS_HVAC_DEFAULT"
+# -----------------------------------------------------------------------------
+
+import Eto.Forms as Forms
+import Eto.Drawing as Drawing
+import Rhino
+import Rhino.Geometry as rg
+import Rhino.Input as ri
+import Rhino.DocObjects as rdo
+import Grasshopper as gh
+import Grasshopper.Kernel as gk
+import Grasshopper.Kernel.Types as gkt
+import scriptcontext as sc
+import System
+import math
+import json
+
+DOC = ghenv.Component.OnPingDocument()
+KEY = "GDS_HubPanel_STICKY"
+
+RESULT_BG_COLOR = Drawing.Color.FromArgb(245, 247, 250)
+
+# ======================= GDS SCHEDULE/PROGRAM PARSER =========================
+class GDSScheduleParser:
+    """Parse GDS module database for schedules and program types"""
+    
+    def __init__(self, json_path=None):
+        self.json_path = json_path
+        self.schedules = {}
+        self.setpoints = {}
+        self.programs = {}
+        self.intensities = {}
+        
+        if json_path:
+            self._load_and_parse()
+    
+    def _load_and_parse(self):
+        """Load and parse GDS JSON database"""
+        try:
+            with open(self.json_path, 'r') as f:
+                data = json.load(f)
+            
+            modules = data.get('modules', {})
+            
+            for module_key, module_data in modules.items():
+                if module_key.startswith('schedule.'):
+                    self._parse_schedule_module(module_key, module_data)
+                elif module_key.startswith('program.') or module_key.startswith('space_type.'):
+                    self._parse_program_module(module_key, module_data)
+                elif module_key.startswith('loads.'):
+                    self._parse_loads_module(module_key, module_data)
+                    
+        except Exception as e:
+            print("GDS Schedule Parser error: {}".format(e))
+    
+    def _parse_schedule_module(self, module_key, module_data):
+        """Parse a schedule module from GDS JSON"""
+        short_key = module_key.replace('schedule.', '')
+        meta = module_data.get('meta', {})
+        display_name = meta.get('display_name', short_key)
+        
+        design = module_data.get('design', {})
+        
+        hourly = design.get('hourly_values', [])
+        if not hourly:
+            hourly = design.get('values', [])
+        
+        if hourly and len(hourly) == 24:
+            schedule_type = design.get('schedule_type', 'fractional')
+            
+            if schedule_type in ['temperature', 'setpoint']:
+                self.setpoints[display_name] = {
+                    'identifier': short_key,
+                    'values': hourly,
+                    'type': schedule_type,
+                    'weekend_values': design.get('weekend_values', hourly)
+                }
+            else:
+                self.schedules[display_name] = {
+                    'identifier': short_key,
+                    'values': hourly,
+                    'type': schedule_type,
+                    'weekend_values': design.get('weekend_values', hourly)
+                }
+    
+    def _parse_program_module(self, module_key, module_data):
+        """Parse a program type module from GDS JSON"""
+        short_key = module_key.replace('program.', '').replace('space_type.', '')
+        meta = module_data.get('meta', {})
+        display_name = meta.get('display_name', short_key)
+        
+        design = module_data.get('design', {})
+        
+        program_dict = {
+            'identifier': short_key,
+            'display_name': display_name,
+        }
+        
+        people = design.get('people', {})
+        if people:
+            program_dict['people'] = {
+                'people_per_area': people.get('people_per_area', 0.0565),
+                'occupancy_schedule': people.get('occupancy_schedule', 'Office Weekday'),
+                'activity_schedule': people.get('activity_schedule', 'Office Seated'),
+            }
+        
+        lighting = design.get('lighting', {})
+        if lighting:
+            program_dict['lighting'] = {
+                'watts_per_area': lighting.get('watts_per_area', 10.76),
+                'schedule': lighting.get('schedule', 'Office Weekday'),
+            }
+        
+        equipment = design.get('electric_equipment', design.get('equipment', {}))
+        if equipment:
+            program_dict['electric_equipment'] = {
+                'watts_per_area': equipment.get('watts_per_area', 10.76),
+                'schedule': equipment.get('schedule', 'Office Weekday'),
+            }
+        
+        infiltration = design.get('infiltration', {})
+        if infiltration:
+            program_dict['infiltration'] = {
+                'flow_per_exterior_area': infiltration.get('flow_per_exterior_area', 0.0003),
+                'schedule': infiltration.get('schedule', 'Always On'),
+            }
+        
+        ventilation = design.get('ventilation', {})
+        if ventilation:
+            program_dict['ventilation'] = {
+                'outdoor_air_per_person': ventilation.get('outdoor_air_per_person', 0.006),
+                'outdoor_air_per_area': ventilation.get('outdoor_air_per_area', 0.0003),
+            }
+        
+        setpoint = design.get('setpoint', {})
+        if setpoint:
+            program_dict['setpoint'] = {
+                'heating_schedule': setpoint.get('heating_schedule', 'Office Heating'),
+                'cooling_schedule': setpoint.get('cooling_schedule', 'Office Cooling'),
+            }
+        
+        self.programs[display_name] = program_dict
+    
+    def _parse_loads_module(self, module_key, module_data):
+        """Parse a loads intensity module from GDS JSON"""
+        short_key = module_key.replace('loads.', '')
+        meta = module_data.get('meta', {})
+        display_name = meta.get('display_name', short_key)
+        
+        design = module_data.get('design', {})
+        
+        self.intensities[display_name] = {
+            'people_per_area': design.get('people_per_area', 0.0565),
+            'lighting_power': design.get('lighting_power', design.get('watts_per_area_lighting', 10.76)),
+            'equipment_power': design.get('equipment_power', design.get('watts_per_area_equipment', 10.76)),
+            'infiltration_rate': design.get('infiltration_rate', design.get('flow_per_exterior_area', 0.0003)),
+            'ventilation_per_person': design.get('ventilation_per_person', design.get('outdoor_air_per_person', 0.006)),
+            'ventilation_per_area': design.get('ventilation_per_area', design.get('outdoor_air_per_area', 0.0003)),
+            # Service Hot Water
+            'shw_flow_per_area': design.get('shw_flow_per_area', 0.0),
+            'shw_target_temp': design.get('shw_target_temp', 49.0),
+        }
+    
+    def get_schedule_values(self, display_name):
+        """Get 24-hour values for a schedule by display name"""
+        if display_name in self.schedules:
+            return self.schedules[display_name]['values']
+        return None
+    
+    def get_setpoint_values(self, display_name):
+        """Get 24-hour values for a setpoint schedule by display name"""
+        if display_name in self.setpoints:
+            return self.setpoints[display_name]['values']
+        return None
+
+
+# ======================= HB LIBRARY LOADERS ==================================
+def load_hb_library_programs():
+    """Load ProgramType identifiers from HB library"""
+    programs = []
+    try:
+        from honeybee_energy.lib.programtypes import PROGRAM_TYPES
+        programs = sorted(list(PROGRAM_TYPES))
+    except Exception as e:
+        pass
+    return programs
+
+
+def load_hb_library_schedules():
+    """Load Schedule identifiers from HB library"""
+    schedules = []
+    try:
+        from honeybee_energy.lib.schedules import SCHEDULES
+        schedules = sorted(list(SCHEDULES))
+    except Exception as e:
+        pass
+    return schedules
+
+
+def get_hb_program_by_id(program_id):
+    """Get a ProgramType object from HB library by identifier"""
+    try:
+        from honeybee_energy.lib.programtypes import program_type_by_identifier
+        return program_type_by_identifier(program_id)
+    except Exception as e:
+        return None
+
+
+def get_hb_schedule_by_id(schedule_id):
+    """Get a ScheduleRuleset object from HB library by identifier"""
+    try:
+        from honeybee_energy.lib.schedules import schedule_by_identifier
+        return schedule_by_identifier(schedule_id)
+    except Exception as e:
+        return None
+
+
+# ======================= PROGRAM DATA CLASS ==================================
+class GDSProgramData:
+    """Holds all program type data for a space - outputs FULL format for HB String to Object"""
+    
+    def __init__(self, identifier="GDS_Custom_Program"):
+        self.identifier = identifier
+        
+        self.people_per_area = 0.0565
+        self.lighting_power = 10.76
+        self.equipment_power = 10.76
+        self.gas_equipment_power = 0.0
+        self.infiltration_rate = 0.0003
+        self.ventilation_per_person = 0.006
+        self.ventilation_per_area = 0.0003
+        
+        # Service Hot Water
+        self.shw_flow_per_area = 0.0        # L/h/m² (0 = disabled)
+        self.shw_target_temp = 49.0         # °C
+        self.shw_sensible_fraction = 0.2
+        self.shw_latent_fraction = 0.05
+        self.shw_schedule = "Residential"
+        
+        self.occupancy_schedule = "Office Weekday"
+        self.occupancy_weekend = "Office Weekend"
+        self.activity_schedule = "Office Seated"
+        self.lighting_schedule = "Office Weekday"
+        self.equipment_schedule = "Office Weekday"
+        self.infiltration_schedule = "Always On"
+        self.heating_setpoint = "Office Heating"
+        self.cooling_setpoint = "Office Cooling"
+        
+        self.custom_schedules = {}
+    
+    def get_schedule_values(self, schedule_name, is_setpoint=False, gds_parser=None):
+        if schedule_name.startswith("Custom:"):
+            key = schedule_name[7:]
+            if key in self.custom_schedules:
+                return self.custom_schedules[key]
+            return [0]*24
+        
+        if schedule_name.startswith("[GDS] "):
+            name = schedule_name[6:]
+            if gds_parser:
+                if is_setpoint:
+                    return gds_parser.get_setpoint_values(name)
+                else:
+                    return gds_parser.get_schedule_values(name)
+            return None
+        
+        if schedule_name.startswith("[HB] "):
+            hb_id = schedule_name[5:]
+            schedule = get_hb_schedule_by_id(hb_id)
+            if schedule:
+                try:
+                    return schedule.values()[0:24] if hasattr(schedule, 'values') else None
+                except:
+                    return None
+            return None
+        
+        if is_setpoint:
+            return SETPOINT_PRESETS.get(schedule_name, [21]*24)
+        elif "Activity" in schedule_name or schedule_name in ACTIVITY_PRESETS:
+            return ACTIVITY_PRESETS.get(schedule_name, [120]*24)
+        else:
+            return SCHEDULE_PRESETS.get(schedule_name, [0]*24)
+    
+    def _make_schedule_full(self, name, weekday_vals, weekend_vals=None, type_limit="Fractional"):
+        """Create ScheduleRuleset dict for JSON serialization"""
+        if weekend_vals is None:
+            weekend_vals = weekday_vals
+        
+        # Ensure values are flat lists of floats
+        weekday_vals = [float(v) for v in weekday_vals]
+        weekend_vals = [float(v) for v in weekend_vals]
+        
+        # Times list for 24-hour schedule: [[0,0], [1,0], [2,0], ..., [23,0]]
+        times_24 = [[i, 0] for i in range(24)]
+        
+        # Type limit definitions
+        type_limits = {
+            "Fractional": {"type": "ScheduleTypeLimit", "identifier": "Fractional", 
+                          "lower_limit": 0, "upper_limit": 1, "numeric_type": "Continuous", "unit_type": "Dimensionless"},
+            "Temperature": {"type": "ScheduleTypeLimit", "identifier": "Temperature",
+                           "lower_limit": -273.15, "upper_limit": 200, "numeric_type": "Continuous", "unit_type": "Temperature"},
+            "ActivityLevel": {"type": "ScheduleTypeLimit", "identifier": "Activity Level",
+                             "lower_limit": 0, "upper_limit": 1000, "numeric_type": "Continuous", "unit_type": "ActivityLevel"},
+        }
+        
+        # Create day schedule identifiers
+        default_day_id = "{}_Default".format(name)
+        weekday_day_id = "{}_Weekday".format(name)
+        
+        # Build the ScheduleRuleset dict
+        return {
+            "type": "ScheduleRuleset",
+            "identifier": name,
+            "schedule_type_limit": type_limits.get(type_limit, type_limits["Fractional"]),
+            "day_schedules": [
+                {
+                    "type": "ScheduleDay",
+                    "identifier": default_day_id,
+                    "values": weekend_vals,
+                    "times": times_24
+                },
+                {
+                    "type": "ScheduleDay",
+                    "identifier": weekday_day_id,
+                    "values": weekday_vals,
+                    "times": times_24
+                }
+            ],
+            "default_day_schedule": default_day_id,
+            "schedule_rules": [
+                {
+                    "type": "ScheduleRuleAbridged",
+                    "schedule_day": weekday_day_id,
+                    "apply_sunday": False,
+                    "apply_monday": True,
+                    "apply_tuesday": True,
+                    "apply_wednesday": True,
+                    "apply_thursday": True,
+                    "apply_friday": True,
+                    "apply_saturday": False,
+                    "start_date": [1, 1],
+                    "end_date": [12, 31]
+                }
+            ]
+        }
+    
+    def to_program_dict(self, gds_parser=None):
+        """Generate FULL ProgramType JSON - works directly with HB Load Objects"""
+        base_id = self.identifier.replace(" ", "_")
+        
+        occ_wd = self.get_schedule_values(self.occupancy_schedule, gds_parser=gds_parser)
+        if occ_wd is None:
+            occ_wd = SCHEDULE_PRESETS.get("Office Weekday", [0]*24)
+        occ_we = self.get_schedule_values(self.occupancy_weekend, gds_parser=gds_parser)
+        if occ_we is None:
+            occ_we = SCHEDULE_PRESETS.get("Office Weekend", occ_wd)
+        occ_sched = self._make_schedule_full("{}_Occupancy".format(base_id), occ_wd, occ_we, "Fractional")
+        
+        act_vals = self.get_schedule_values(self.activity_schedule, gds_parser=gds_parser)
+        if act_vals is None:
+            act_vals = ACTIVITY_PRESETS.get("Office Seated", [120]*24)
+        act_sched = self._make_schedule_full("{}_Activity".format(base_id), act_vals, act_vals, "ActivityLevel")
+        
+        light_vals = self.get_schedule_values(self.lighting_schedule, gds_parser=gds_parser)
+        if light_vals is None:
+            light_vals = SCHEDULE_PRESETS.get("Office Weekday", [0]*24)
+        light_sched = self._make_schedule_full("{}_Lighting".format(base_id), light_vals, [v*0.1 for v in light_vals], "Fractional")
+        
+        equip_vals = self.get_schedule_values(self.equipment_schedule, gds_parser=gds_parser)
+        if equip_vals is None:
+            equip_vals = SCHEDULE_PRESETS.get("Office Weekday", [0]*24)
+        equip_sched = self._make_schedule_full("{}_Equipment".format(base_id), equip_vals, [v*0.3 for v in equip_vals], "Fractional")
+        
+        infil_vals = self.get_schedule_values(self.infiltration_schedule, gds_parser=gds_parser)
+        if infil_vals is None:
+            infil_vals = [1.0]*24
+        infil_sched = self._make_schedule_full("{}_Infiltration".format(base_id), infil_vals, infil_vals, "Fractional")
+        
+        vent_sched = self._make_schedule_full("{}_Ventilation".format(base_id), occ_wd, [0]*24, "Fractional")
+        
+        heat_vals = self.get_schedule_values(self.heating_setpoint, is_setpoint=True, gds_parser=gds_parser)
+        if heat_vals is None:
+            heat_vals = SETPOINT_PRESETS.get("Office Heating", [21]*24)
+        heat_sched = self._make_schedule_full("{}_Heating".format(base_id), heat_vals, [v-2 for v in heat_vals], "Temperature")
+        
+        cool_vals = self.get_schedule_values(self.cooling_setpoint, is_setpoint=True, gds_parser=gds_parser)
+        if cool_vals is None:
+            cool_vals = SETPOINT_PRESETS.get("Office Cooling", [24]*24)
+        cool_sched = self._make_schedule_full("{}_Cooling".format(base_id), cool_vals, [v+2 for v in cool_vals], "Temperature")
+        
+        program = {
+            "type": "ProgramType",
+            "identifier": base_id,
+            "display_name": self.identifier,
+            
+            "people": {
+                "type": "People",
+                "identifier": "{}_People".format(base_id),
+                "people_per_area": self.people_per_area,
+                "occupancy_schedule": occ_sched,
+                "activity_schedule": act_sched,
+                "radiant_fraction": 0.3,
+                "latent_fraction": {"type": "Autocalculate"}
+            },
+            
+            "lighting": {
+                "type": "Lighting",
+                "identifier": "{}_Lighting".format(base_id),
+                "watts_per_area": self.lighting_power,
+                "schedule": light_sched,
+                "visible_fraction": 0.25,
+                "radiant_fraction": 0.32,
+                "return_air_fraction": 0.0
+            },
+            
+            "electric_equipment": {
+                "type": "ElectricEquipment",
+                "identifier": "{}_ElecEquip".format(base_id),
+                "watts_per_area": self.equipment_power,
+                "schedule": equip_sched,
+                "radiant_fraction": 0.5,
+                "latent_fraction": 0.0,
+                "lost_fraction": 0.0
+            },
+            
+            "infiltration": {
+                "type": "Infiltration",
+                "identifier": "{}_Infiltration".format(base_id),
+                "flow_per_exterior_area": self.infiltration_rate,
+                "schedule": infil_sched,
+                "constant_coefficient": 1.0,
+                "temperature_coefficient": 0.0,
+                "velocity_coefficient": 0.0
+            },
+            
+            "ventilation": {
+                "type": "Ventilation",
+                "identifier": "{}_Ventilation".format(base_id),
+                "outdoor_air_per_person": self.ventilation_per_person,
+                "outdoor_air_per_area": self.ventilation_per_area,
+                "air_changes_per_hour": 0.0,
+                "schedule": vent_sched
+            },
+            
+            "setpoint": {
+                "type": "Setpoint",
+                "identifier": "{}_Setpoint".format(base_id),
+                "heating_schedule": heat_sched,
+                "cooling_schedule": cool_sched
+            }
+        }
+        
+        if self.gas_equipment_power > 0:
+            program["gas_equipment"] = {
+                "type": "GasEquipment",
+                "identifier": "{}_GasEquip".format(base_id),
+                "watts_per_area": self.gas_equipment_power,
+                "schedule": equip_sched,
+                "radiant_fraction": 0.3,
+                "latent_fraction": 0.0,
+                "lost_fraction": 0.0
+            }
+        
+        # Service Hot Water (only if flow > 0)
+        if self.shw_flow_per_area > 0:
+            shw_vals = self.get_schedule_values(self.shw_schedule, gds_parser=gds_parser)
+            if shw_vals is None:
+                shw_vals = SCHEDULE_PRESETS.get("Residential", [0.5]*24)
+            shw_sched = self._make_schedule_full("{}_SHW".format(base_id), shw_vals, shw_vals, "Fractional")
+            
+            program["service_hot_water"] = {
+                "type": "ServiceHotWater",
+                "identifier": "{}_SHW".format(base_id),
+                "flow_per_area": self.shw_flow_per_area,
+                "schedule": shw_sched,
+                "target_temperature": self.shw_target_temp,
+                "sensible_fraction": self.shw_sensible_fraction,
+                "latent_fraction": self.shw_latent_fraction
+            }
+        
+        return program
+
+
+# --------------------------- helpers -----------------------------------------
+def schedule(action):
+    def cb(doc):
+        try:
+            action()
+        except Exception as e:
+            print("Schedule error: {}".format(e))
+    if DOC:
+        DOC.ScheduleSolution(1, gk.GH_Document.GH_ScheduleDelegate(cb))
+
+def find_objs(type_name, nickname):
+    hits = []
+    if not DOC:
+        return hits
+    try:
+        for obj in DOC.Objects:
+            if obj and obj.NickName == nickname and obj.GetType().Name == type_name:
+                hits.append(obj)
+    except:
+        pass
+    return hits
+
+def get_breps_from_param(nickname):
+    breps = []
+    if not DOC:
+        return breps
+    
+    for obj in DOC.Objects:
+        try:
+            if obj.NickName != nickname:
+                continue
+            if "Brep" not in obj.GetType().Name:
+                continue
+            
+            if hasattr(obj, 'VolatileData') and obj.VolatileData is not None:
+                vd = obj.VolatileData
+                if not vd.IsEmpty:
+                    for path in vd.Paths:
+                        branch = vd.get_Branch(path)
+                        if branch:
+                            for item in branch:
+                                geom = None
+                                if hasattr(item, 'Value'):
+                                    geom = item.Value
+                                if geom and isinstance(geom, rg.Brep):
+                                    breps.append(geom.DuplicateBrep())
+            
+            if not breps and hasattr(obj, 'PersistentData') and obj.PersistentData is not None:
+                pd = obj.PersistentData
+                if not pd.IsEmpty:
+                    for path in pd.Paths:
+                        branch = pd.get_Branch(path)
+                        if branch:
+                            for item in branch:
+                                geom = None
+                                if hasattr(item, 'Value'):
+                                    geom = item.Value
+                                if geom and isinstance(geom, rg.Brep):
+                                    breps.append(geom.DuplicateBrep())
+        except Exception as e:
+            print("Error reading from {}: {}".format(nickname, e))
+    
+    return breps
+
+def get_slider_info(name, default_val=1.0):
+    sliders = find_objs("GH_NumberSlider", name)
+    if not sliders:
+        return (0.0, 10.0, float(default_val), 0)
+    sld = sliders[0]
+    try:
+        mn = float(sld.Slider.Minimum)
+        mx = float(sld.Slider.Maximum)
+        val = float(sld.CurrentValue) if hasattr(sld, "CurrentValue") else float(sld.Slider.Value)
+        dec = sld.Slider.DecimalPlaces if hasattr(sld.Slider, 'DecimalPlaces') else 0
+        return (mn, mx, val, dec)
+    except:
+        return (0.0, 10.0, float(default_val), 0)
+
+def set_slider_value(name, value):
+    targets = find_objs("GH_NumberSlider", name)
+    if not targets:
+        return
+    v = float(value)
+    def do():
+        for sld in targets:
+            try:
+                mn = float(sld.Slider.Minimum)
+                mx = float(sld.Slider.Maximum)
+                sld.SetSliderValue(max(mn, min(mx, v)))
+                sld.ExpireSolution(True)
+            except:
+                pass
+    schedule(do)
+
+def get_toggles_aggregate(name):
+    tgs = find_objs("GH_BooleanToggle", name)
+    if not tgs:
+        return False
+    states = []
+    for t in tgs:
+        if hasattr(t, 'Value'):
+            states.append(bool(t.Value))
+    if not states:
+        return False
+    if all(states):
+        return True
+    if not any(states):
+        return False
+    return None
+
+def _panel_display_text(panel, max_items=OUT_MAX_ITEMS):
+    try:
+        if panel and panel.SourceCount > 0 and panel.VolatileData is not None:
+            dt = panel.VolatileData
+            lines = []
+            for path in dt.Paths:
+                branch = dt.get_Branch(path)
+                if not branch:
+                    continue
+                vals = []
+                for i, goo in enumerate(branch):
+                    if i >= max_items:
+                        vals.append(u"...(+{} more)".format(len(branch) - max_items))
+                        break
+                    v = getattr(goo, "Value", None)
+                    vals.append(unicode(v) if v is not None else unicode(goo))
+                lines.append(u"{}: {}".format(path, u", ".join(vals)))
+            return u"\n".join(lines) if lines else u""
+        elif panel:
+            return unicode(panel.UserText or u"")
+        return u""
+    except Exception as e:
+        return u"Error: {}".format(e)
+
+def get_output_panels_text(name):
+    pans = find_objs("GH_Panel", name)
+    if not pans:
+        return u""
+    chunks = []
+    for i, p in enumerate(pans, 1):
+        txt = _panel_display_text(p)
+        header = u"— {} #{} —".format(name, i) if len(pans) > 1 else u""
+        if txt:
+            chunks.append((header + "\n" if header else u"") + txt)
+    return u"\n\n".join(chunks) if chunks else u""
+
+def get_first_input_panel_text(name):
+    pans = find_objs("GH_Panel", name)
+    if not pans:
+        return u""
+    try:
+        if pans[0] and hasattr(pans[0], 'UserText'):
+            return unicode(pans[0].UserText or u"")
+    except:
+        pass
+    return u""
+
+def set_panel_text(name, text):
+    targets = find_objs("GH_Panel", name)
+    if not targets:
+        return
+    def do():
+        for p in targets:
+            try:
+                p.UserText = text
+                p.ExpireSolution(True)
+            except:
+                pass
+    schedule(do)
+
+def set_bool_data_component(nickname, bool_list):
+    """
+    Set boolean values to a Data component (Param_GenericObject or Param_Boolean).
+    Used for conditioning status output to HB Room from Solid.
+    """
+    targets = []
+    for obj in DOC.Objects:
+        # Look for data params with matching nickname
+        obj_type = obj.GetType().Name
+        if obj.NickName == nickname and ("Param_" in obj_type or "Data" in obj_type):
+            targets.append(obj)
+    
+    if not targets or not bool_list:
+        return False
+    
+    def do():
+        for comp in targets:
+            try:
+                comp.PersistentData.Clear()
+                comp.ClearData()
+                for val in bool_list:
+                    # Use GH_Boolean for proper type
+                    comp.PersistentData.Append(gkt.GH_Boolean(bool(val)))
+                comp.ExpireSolution(True)
+            except Exception as ex:
+                print("Error setting bool data: {}".format(ex))
+    schedule(do)
+    return True
+
+def set_brep_components(breps, nickname):
+    targets = []
+    for obj in DOC.Objects:
+        if obj.NickName == nickname and "Brep" in obj.GetType().Name:
+            targets.append(obj)
+    if not targets or not breps:
+        return
+    for comp in targets:
+        try:
+            comp.PersistentData.Clear()
+            comp.ClearData()
+            for brep in breps:
+                comp.PersistentData.Append(gkt.GH_Brep(brep))
+            comp.ExpireSolution(True)
+        except Exception as e:
+            print("Error setting Brep: {}".format(e))
+
+def press_button(name):
+    targets = find_objs("GH_ButtonObject", name)
+    if not targets:
+        return
+    def press():
+        for btn in targets:
+            try:
+                btn.ButtonDown = True
+                btn.ExpireSolution(True)
+            except:
+                pass
+    def release():
+        for btn in targets:
+            try:
+                btn.ButtonDown = False
+                btn.ExpireSolution(True)
+            except:
+                pass
+    schedule(press)
+    schedule(release)
+
+def create_coplanar_aperture_by_ratio(face_brep, ratio):
+    try:
+        srf = face_brep.Faces[0]
+        amp = rg.AreaMassProperties.Compute(face_brep)
+        if not amp:
+            return None, 0, 0
+        
+        face_area = amp.Area
+        centroid = amp.Centroid
+        
+        rc, u, v = srf.ClosestPoint(centroid)
+        if not rc:
+            u = (srf.Domain(0).T0 + srf.Domain(0).T1) / 2.0
+            v = (srf.Domain(1).T0 + srf.Domain(1).T1) / 2.0
+        
+        rc, frame = srf.FrameAt(u, v)
+        if not rc:
+            return None, 0, 0
+        
+        center_pt = frame.Origin
+        normal = frame.ZAxis
+        x_axis = frame.XAxis
+        y_axis = frame.YAxis
+        
+        if abs(normal.Z) < 0.7:
+            z_world = rg.Vector3d.ZAxis
+            z_in_plane = z_world - normal * (z_world * normal)
+            if z_in_plane.Length > 0.01:
+                z_in_plane.Unitize()
+                y_axis = z_in_plane
+                x_axis = rg.Vector3d.CrossProduct(y_axis, normal)
+                x_axis.Unitize()
+        
+        local_plane = rg.Plane(center_pt, x_axis, y_axis)
+        bb = face_brep.GetBoundingBox(local_plane)
+        face_width = bb.Max.X - bb.Min.X
+        face_height = bb.Max.Y - bb.Min.Y
+        
+        if face_width < 0.01:
+            face_width = 1.0
+        if face_height < 0.01:
+            face_height = 1.0
+        
+        aperture_area = face_area * ratio
+        aspect = face_width / face_height
+        ap_height = math.sqrt(aperture_area / aspect)
+        ap_width = aperture_area / ap_height if ap_height > 0.01 else math.sqrt(aperture_area)
+        
+        max_width = face_width * 0.95
+        max_height = face_height * 0.95
+        ap_width = min(max(ap_width, 0.1), max_width)
+        ap_height = min(max(ap_height, 0.1), max_height)
+        
+        plane = rg.Plane(center_pt, x_axis, y_axis)
+        rect = rg.Rectangle3d(plane,
+                              rg.Interval(-ap_width/2.0, ap_width/2.0),
+                              rg.Interval(-ap_height/2.0, ap_height/2.0))
+        
+        curve = rect.ToNurbsCurve()
+        aperture_breps = rg.Brep.CreatePlanarBreps(curve, 0.001)
+        
+        if aperture_breps and len(aperture_breps) > 0:
+            return aperture_breps[0], ap_width, ap_height
+            
+    except Exception as e:
+        print("Aperture by ratio error: {}".format(e))
+    return None, 0, 0
+
+def create_coplanar_aperture_by_dims(face_brep, width, height):
+    try:
+        srf = face_brep.Faces[0]
+        amp = rg.AreaMassProperties.Compute(face_brep)
+        if not amp:
+            return None, 0, 0
+        
+        centroid = amp.Centroid
+        rc, u, v = srf.ClosestPoint(centroid)
+        if not rc:
+            u = (srf.Domain(0).T0 + srf.Domain(0).T1) / 2.0
+            v = (srf.Domain(1).T0 + srf.Domain(1).T1) / 2.0
+        
+        rc, frame = srf.FrameAt(u, v)
+        if not rc:
+            return None, 0, 0
+        
+        center_pt = frame.Origin
+        normal = frame.ZAxis
+        x_axis = frame.XAxis
+        y_axis = frame.YAxis
+        
+        if abs(normal.Z) < 0.7:
+            z_world = rg.Vector3d.ZAxis
+            z_in_plane = z_world - normal * (z_world * normal)
+            if z_in_plane.Length > 0.01:
+                z_in_plane.Unitize()
+                y_axis = z_in_plane
+                x_axis = rg.Vector3d.CrossProduct(y_axis, normal)
+                x_axis.Unitize()
+        
+        local_plane = rg.Plane(center_pt, x_axis, y_axis)
+        bb = face_brep.GetBoundingBox(local_plane)
+        face_width = bb.Max.X - bb.Min.X
+        face_height = bb.Max.Y - bb.Min.Y
+        
+        if face_width < 0.01:
+            face_width = 1.0
+        if face_height < 0.01:
+            face_height = 1.0
+        
+        ap_width = float(width)
+        ap_height = float(height)
+        
+        max_width = face_width * 0.95
+        max_height = face_height * 0.95
+        ap_width = min(max(ap_width, 0.1), max_width)
+        ap_height = min(max(ap_height, 0.1), max_height)
+        
+        plane = rg.Plane(center_pt, x_axis, y_axis)
+        rect = rg.Rectangle3d(plane,
+                              rg.Interval(-ap_width/2.0, ap_width/2.0),
+                              rg.Interval(-ap_height/2.0, ap_height/2.0))
+        
+        curve = rect.ToNurbsCurve()
+        aperture_breps = rg.Brep.CreatePlanarBreps(curve, 0.001)
+        
+        if aperture_breps and len(aperture_breps) > 0:
+            return aperture_breps[0], ap_width, ap_height
+            
+    except Exception as e:
+        print("Aperture by dims error: {}".format(e))
+    return None, 0, 0
+
+def create_coplanar_door_by_ratio(face_brep, ratio, sill_height=0.0):
+    """Create a door surface on a face by ratio, with sill height offset"""
+    try:
+        srf = face_brep.Faces[0]
+        amp = rg.AreaMassProperties.Compute(face_brep)
+        if not amp:
+            return None, 0, 0
+        
+        face_area = amp.Area
+        centroid = amp.Centroid
+        
+        rc, u, v = srf.ClosestPoint(centroid)
+        if not rc:
+            u = (srf.Domain(0).T0 + srf.Domain(0).T1) / 2.0
+            v = (srf.Domain(1).T0 + srf.Domain(1).T1) / 2.0
+        
+        rc, frame = srf.FrameAt(u, v)
+        if not rc:
+            return None, 0, 0
+        
+        center_pt = frame.Origin
+        normal = frame.ZAxis
+        x_axis = frame.XAxis
+        y_axis = frame.YAxis
+        
+        if abs(normal.Z) < 0.7:
+            z_world = rg.Vector3d.ZAxis
+            z_in_plane = z_world - normal * (z_world * normal)
+            if z_in_plane.Length > 0.01:
+                z_in_plane.Unitize()
+                y_axis = z_in_plane
+                x_axis = rg.Vector3d.CrossProduct(y_axis, normal)
+                x_axis.Unitize()
+        
+        local_plane = rg.Plane(center_pt, x_axis, y_axis)
+        bb = face_brep.GetBoundingBox(local_plane)
+        face_width = bb.Max.X - bb.Min.X
+        face_height = bb.Max.Y - bb.Min.Y
+        
+        if face_width < 0.01:
+            face_width = 1.0
+        if face_height < 0.01:
+            face_height = 1.0
+        
+        door_area = face_area * ratio
+        aspect = 0.45
+        door_height = math.sqrt(door_area / aspect)
+        door_width = door_area / door_height if door_height > 0.01 else math.sqrt(door_area)
+        
+        max_width = face_width * 0.95
+        max_height = face_height * 0.95 - sill_height
+        door_width = min(max(door_width, 0.1), max_width)
+        door_height = min(max(door_height, 0.1), max_height)
+        
+        bottom_center = rg.Point3d(center_pt)
+        bottom_center = bottom_center - y_axis * (face_height / 2.0 - sill_height - door_height / 2.0)
+        
+        plane = rg.Plane(bottom_center, x_axis, y_axis)
+        rect = rg.Rectangle3d(plane,
+                              rg.Interval(-door_width/2.0, door_width/2.0),
+                              rg.Interval(-door_height/2.0, door_height/2.0))
+        
+        curve = rect.ToNurbsCurve()
+        door_breps = rg.Brep.CreatePlanarBreps(curve, 0.001)
+        
+        if door_breps and len(door_breps) > 0:
+            return door_breps[0], door_width, door_height
+            
+    except Exception as e:
+        print("Door by ratio error: {}".format(e))
+    return None, 0, 0
+
+def create_coplanar_door_by_dims(face_brep, width, height, sill_height=0.0):
+    """Create a door surface on a face by dimensions, with sill height offset"""
+    try:
+        srf = face_brep.Faces[0]
+        amp = rg.AreaMassProperties.Compute(face_brep)
+        if not amp:
+            return None, 0, 0
+        
+        centroid = amp.Centroid
+        rc, u, v = srf.ClosestPoint(centroid)
+        if not rc:
+            u = (srf.Domain(0).T0 + srf.Domain(0).T1) / 2.0
+            v = (srf.Domain(1).T0 + srf.Domain(1).T1) / 2.0
+        
+        rc, frame = srf.FrameAt(u, v)
+        if not rc:
+            return None, 0, 0
+        
+        center_pt = frame.Origin
+        normal = frame.ZAxis
+        x_axis = frame.XAxis
+        y_axis = frame.YAxis
+        
+        if abs(normal.Z) < 0.7:
+            z_world = rg.Vector3d.ZAxis
+            z_in_plane = z_world - normal * (z_world * normal)
+            if z_in_plane.Length > 0.01:
+                z_in_plane.Unitize()
+                y_axis = z_in_plane
+                x_axis = rg.Vector3d.CrossProduct(y_axis, normal)
+                x_axis.Unitize()
+        
+        local_plane = rg.Plane(center_pt, x_axis, y_axis)
+        bb = face_brep.GetBoundingBox(local_plane)
+        face_width = bb.Max.X - bb.Min.X
+        face_height = bb.Max.Y - bb.Min.Y
+        
+        if face_width < 0.01:
+            face_width = 1.0
+        if face_height < 0.01:
+            face_height = 1.0
+        
+        door_width = float(width)
+        door_height = float(height)
+        
+        max_width = face_width * 0.95
+        max_height = face_height * 0.95 - sill_height
+        door_width = min(max(door_width, 0.1), max_width)
+        door_height = min(max(door_height, 0.1), max_height)
+        
+        bottom_center = rg.Point3d(center_pt)
+        bottom_center = bottom_center - y_axis * (face_height / 2.0 - sill_height - door_height / 2.0)
+        
+        plane = rg.Plane(bottom_center, x_axis, y_axis)
+        rect = rg.Rectangle3d(plane,
+                              rg.Interval(-door_width/2.0, door_width/2.0),
+                              rg.Interval(-door_height/2.0, door_height/2.0))
+        
+        curve = rect.ToNurbsCurve()
+        door_breps = rg.Brep.CreatePlanarBreps(curve, 0.001)
+        
+        if door_breps and len(door_breps) > 0:
+            return door_breps[0], door_width, door_height
+            
+    except Exception as e:
+        print("Door by dims error: {}".format(e))
+    return None, 0, 0
+
+def get_hb_rooms_from_param(nickname):
+    """Get HB Room objects from a GH parameter by nickname"""
+    rooms = []
+    if not DOC:
+        return rooms
+    
+    for obj in DOC.Objects:
+        try:
+            if obj.NickName != nickname:
+                continue
+            
+            if hasattr(obj, 'VolatileData') and obj.VolatileData is not None:
+                vd = obj.VolatileData
+                if not vd.IsEmpty:
+                    for path in vd.Paths:
+                        branch = vd.get_Branch(path)
+                        if branch:
+                            for item in branch:
+                                val = getattr(item, 'Value', item)
+                                if val is not None and hasattr(val, 'display_name') and hasattr(val, 'floor_area'):
+                                    rooms.append(val)
+            
+            if not rooms and hasattr(obj, 'PersistentData') and obj.PersistentData is not None:
+                pd = obj.PersistentData
+                if not pd.IsEmpty:
+                    for path in pd.Paths:
+                        branch = pd.get_Branch(path)
+                        if branch:
+                            for item in branch:
+                                val = getattr(item, 'Value', item)
+                                if val is not None and hasattr(val, 'display_name') and hasattr(val, 'floor_area'):
+                                    rooms.append(val)
+        except Exception as e:
+            print("Error reading HB rooms from {}: {}".format(nickname, e))
+    
+    return rooms
+
+def set_hb_rooms_to_param(rooms, nickname):
+    """Set HB Room objects to a GH parameter by nickname"""
+    targets = []
+    for obj in DOC.Objects:
+        if obj.NickName == nickname:
+            targets.append(obj)
+    
+    if not targets or not rooms:
+        return False
+    
+    try:
+        for comp in targets:
+            comp.PersistentData.Clear()
+            comp.ClearData()
+            for room in rooms:
+                from Grasshopper.Kernel.Types import GH_ObjectWrapper
+                comp.PersistentData.Append(GH_ObjectWrapper(room))
+            comp.ExpireSolution(True)
+        return True
+    except Exception as e:
+        print("Error setting HB rooms: {}".format(e))
+        return False
+
+def create_shaded_groupbox(title):
+    grp = Forms.GroupBox(Text=title)
+    grp.BackgroundColor = RESULT_BG_COLOR
+    return grp
+
+def get_hb_shades_from_param(nickname):
+    """Get HB Shade objects from a GH parameter by nickname"""
+    shades = []
+    if not DOC:
+        return shades
+    
+    for obj in DOC.Objects:
+        try:
+            if obj.NickName != nickname:
+                continue
+            
+            if hasattr(obj, 'VolatileData') and obj.VolatileData is not None:
+                vd = obj.VolatileData
+                if not vd.IsEmpty:
+                    for path in vd.Paths:
+                        branch = vd.get_Branch(path)
+                        if branch:
+                            for item in branch:
+                                val = getattr(item, 'Value', item)
+                                # Check if it looks like an HB Shade
+                                if val is not None and hasattr(val, 'geometry') and hasattr(val, 'identifier'):
+                                    shades.append(val)
+            
+            if not shades and hasattr(obj, 'PersistentData') and obj.PersistentData is not None:
+                pd = obj.PersistentData
+                if not pd.IsEmpty:
+                    for path in pd.Paths:
+                        branch = pd.get_Branch(path)
+                        if branch:
+                            for item in branch:
+                                val = getattr(item, 'Value', item)
+                                if val is not None and hasattr(val, 'geometry') and hasattr(val, 'identifier'):
+                                    shades.append(val)
+        except Exception as e:
+            print("Error reading HB shades from {}: {}".format(nickname, e))
+    
+    return shades
+
+
+# --------------------------- UI class ----------------------------------------
+class GDSHubPanel(Forms.Form):
+    def __init__(self):
+        super(GDSHubPanel, self).__init__()
+        self.Title = WINDOW_TITLE
+        self.ClientSize = Drawing.Size(WINDOW_SIZE[0], WINDOW_SIZE[1])
+        self.Padding = Drawing.Padding(10)
+        self.Resizable = True
+        
+        self.selected_breps = []
+        self.collected_breps = []
+        self.envelope_breps = []
+        self.surface_list = []
+        self.aperture_surfaces = []
+        self.door_surfaces = []
+        # Cumulative lists for all applied apertures/doors (append mode)
+        self.applied_apertures = []
+        self.applied_doors = []
+        self._on_solution_end = None
+        
+        # Schedule module data
+        self.program_data = GDSProgramData()
+        self.gds_parser = None
+        self.hb_library_schedules = []
+        self.hb_library_programs = []
+        
+        # Room storage
+        self.hb_rooms = []
+        self.hb_rooms_info = []
+        
+        # Pending program assignments: {room_index: program_dict}
+        self.pending_assignments = {}
+        
+        # Error tracking
+        self._last_program_error = None
+        
+        # Custom schedules loaded from GH Panel
+        self.saved_custom_schedules = {}
+        
+        # HVAC module data
+        self.hvac_rooms = []           # HB rooms for HVAC assignment
+        self.hvac_rooms_info = []      # Room info cache
+        self.pending_hvac = {}         # {room_index: hvac_config_dict}
+        self.current_hvac_config = {}  # Current UI HVAC configuration
+        
+        # Renewable energy module data
+        self.pv_shades = []            # HB Shade objects for PV
+        self.pv_shade_breps = []       # Rhino Brep geometries (when picked directly)
+        
+        self._create_ui()
+        self._setup_events()
+        self._load_hb_library()
+        self._load_custom_schedules_silent()
+    
+    def _load_hb_library(self):
+        """Load HB library schedules and programs"""
+        self.hb_library_schedules = load_hb_library_schedules()
+        self.hb_library_programs = load_hb_library_programs()
+    
+    def _load_custom_schedules_silent(self):
+        """Load custom schedules from GH Panel on startup (silent)"""
+        try:
+            existing_json = get_first_input_panel_text(NAME_CUSTOM_SCHEDULES)
+            if existing_json.strip():
+                all_schedules = json.loads(existing_json)
+                self.saved_custom_schedules = all_schedules
+                for name, data in all_schedules.items():
+                    self.program_data.custom_schedules[name] = data.get("values", [0]*24)
+        except:
+            pass
+    
+    def _load_gds_database(self, path=None):
+        """Load GDS database from path"""
+        if path is None:
+            path = get_first_input_panel_text("GDS Database Path")
+        
+        if path and path.strip():
+            self.gds_parser = GDSScheduleParser(path.strip())
+            return True
+        return False
+    
+    def _create_ui(self):
+        self.tab_control = Forms.TabControl()
+        
+        self.tab_space = Forms.TabPage(Text="1. Space Module")
+        self._create_space_module()
+        self.tab_control.Pages.Add(self.tab_space)
+        
+        self.tab_envelope = Forms.TabPage(Text="2. Enclosure Module")
+        self._create_envelope_module()
+        self.tab_control.Pages.Add(self.tab_envelope)
+        
+        self.tab_schedule = Forms.TabPage(Text="3. Service Module")
+        self._create_schedule_module()
+        self.tab_control.Pages.Add(self.tab_schedule)
+        
+        self.tab_hvac = Forms.TabPage(Text="4. HVAC Module")
+        self._create_hvac_module()
+        self.tab_control.Pages.Add(self.tab_hvac)
+        
+        self.tab_site = Forms.TabPage(Text="5. Site Module")
+        self._create_site_module()
+        self.tab_control.Pages.Add(self.tab_site)
+        
+        self.tab_renewables = Forms.TabPage(Text="6. Advanced (IDF)")
+        self._create_renewables_module()
+        self.tab_control.Pages.Add(self.tab_renewables)
+        
+        # Quick Evaluation is now a separate panel, not a tab (v62)
+        self._create_quick_eval_panel()
+        
+        # Main content container - holds either tab_control or quick_eval_panel
+        self.main_container = Forms.Panel()
+        self.main_container.Content = self.tab_control
+        self.showing_quick_eval = False
+        
+        # Navigation bar with Prev/Next on left, Quick Evaluation toggle on right
+        nav_layout = Forms.DynamicLayout()
+        nav_layout.BeginHorizontal()
+        
+        # Left side: Prev/Next
+        self.btn_prev = Forms.Button(Text="< Previous")
+        self.btn_prev.Enabled = False
+        self.btn_next = Forms.Button(Text="Next >")
+        nav_layout.Add(self.btn_prev)
+        nav_layout.Add(self.btn_next)
+        
+        nav_layout.Add(None)  # Spacer
+        
+        # Right side: Quick Evaluation toggle button
+        self.btn_toggle_qe = Forms.Button(Text="Quick Evaluation ▶")
+        self.btn_toggle_qe.Width = 140
+        nav_layout.Add(self.btn_toggle_qe)
+        
+        nav_layout.EndHorizontal()
+        
+        root = Forms.DynamicLayout()
+        root.DefaultSpacing = Drawing.Size(0, 8)
+        root.Add(self.main_container, xscale=True, yscale=True)
+        root.Add(nav_layout)
+        self.Content = root
+    
+    def _create_space_module(self):
+        """Module 1: Space
+        Layout: 2 columns (4:6 width ratio)
+        - Column 1: Geometry Definition (top) + Input Panels (bottom), height 1:1
+        - Column 2: Parameters (top) + Performance (bottom), height 6:4
+        """
+        layout = Forms.DynamicLayout()
+        layout.DefaultSpacing = Drawing.Size(8, 8)
+        layout.Padding = Drawing.Padding(10)
+        
+        columns = Forms.DynamicLayout()
+        columns.DefaultSpacing = Drawing.Size(8, 0)
+        columns.BeginHorizontal()
+        
+        # ========== COLUMN 1: Geometry Definition + Input Panels (stacked) ==========
+        col1_layout = Forms.DynamicLayout()
+        col1_layout.DefaultSpacing = Drawing.Size(0, 8)
+        
+        # --- Geometry Definition (Top) ---
+        grp_def = Forms.GroupBox(Text="Geometry Definition")
+        def_layout = Forms.DynamicLayout()
+        def_layout.DefaultSpacing = Drawing.Size(5, 5)
+        def_layout.Padding = Drawing.Padding(8)
+        
+        def_layout.AddRow(Forms.Label(Text="Selected Brep(s):"))
+        self.txt_brep_info = Forms.TextArea()
+        self.txt_brep_info.ReadOnly = True
+        self.txt_brep_info.Text = "No Breps selected"
+        self.txt_brep_info.Height = 100  
+        def_layout.Add(self.txt_brep_info, xscale=True)
+        
+        # Buttons row - each takes 50% width using xscale=True
+        btn_geo_row = Forms.DynamicLayout()
+        btn_geo_row.BeginHorizontal()
+        self.btn_select = Forms.Button(Text="Select")
+        btn_geo_row.Add(self.btn_select, xscale=True)  # 50% width
+        self.btn_load = Forms.Button(Text="Load/Reload")
+        btn_geo_row.Add(self.btn_load, xscale=True)    # 50% width
+        btn_geo_row.EndHorizontal()
+        def_layout.Add(btn_geo_row, xscale=True)
+        
+        dup_info = get_slider_info(NAME_SLIDER_DUP, DUP_DEFAULT)
+        dup_row = Forms.DynamicLayout()
+        dup_row.BeginHorizontal()
+        dup_row.Add(Forms.Label(Text="# Duplicates:"))
+        self.num_dup = Forms.NumericUpDown()
+        self.num_dup.MinValue = dup_info[0]
+        self.num_dup.MaxValue = dup_info[1]
+        self.num_dup.DecimalPlaces = dup_info[0]
+        self.num_dup.Increment = 1
+        self.num_dup.Value = dup_info[2]
+        self.num_dup.Width = 55
+        dup_row.Add(self.num_dup)
+        dup_row.Add(None)
+        dup_row.EndHorizontal()
+        def_layout.Add(dup_row)
+        
+        self.chk_run = Forms.CheckBox(Text="RUN_SIM")
+        self.chk_run.Checked = get_toggles_aggregate(NAME_TOGGLE)
+        def_layout.AddRow(self.chk_run)
+        
+        def_layout.Add(None, yscale=True)
+        grp_def.Content = def_layout
+        
+        # --- Input Panels (Bottom) ---
+        grp_in = Forms.GroupBox(Text="Input Panels")
+        in_layout = Forms.DynamicLayout()
+        in_layout.DefaultSpacing = Drawing.Size(5, 4)
+        in_layout.Padding = Drawing.Padding(8)
+        
+        self.txt_in_list = []
+        for name in NAME_PANELS_IN:
+            in_layout.AddRow(Forms.Label(Text=name + ":"))
+            ta = Forms.TextArea()
+            ta.Text = get_first_input_panel_text(name)
+            ta.Height = 35
+            self.txt_in_list.append((name, ta))
+            in_layout.Add(ta, xscale=True)
+        
+        # Panel action buttons: Apply | Clear (50-50)
+        btn_row1 = Forms.DynamicLayout()
+        btn_row1.BeginHorizontal()
+        self.btn_apply_in = Forms.Button(Text="Apply")
+        self.btn_clear = Forms.Button(Text="Clear")
+        btn_row1.Add(self.btn_apply_in, xscale=True)
+        btn_row1.Add(self.btn_clear, xscale=True)
+        btn_row1.EndHorizontal()
+        in_layout.AddRow(btn_row1)
+        
+        in_layout.Add(None, yscale=True)
+        grp_in.Content = in_layout
+        
+        # Stack Geometry Definition and Input Panels (1:1 height ratio)
+        self._space_col1_split = Forms.Splitter()
+        self._space_col1_split.Orientation = Forms.Orientation.Vertical
+        self._space_col1_split.Panel1 = grp_def
+        self._space_col1_split.Panel2 = grp_in
+        self._space_col1_split.Position = 200
+        
+        col1_layout.Add(self._space_col1_split, xscale=True, yscale=True)
+        
+        # ========== COLUMN 2: Space Conditioning (v62) ==========
+        col2_layout = Forms.DynamicLayout()
+        col2_layout.DefaultSpacing = Drawing.Size(0, 8)
+        
+        grp_cond = Forms.GroupBox(Text="Space Conditioning")
+        cond_layout = Forms.DynamicLayout()
+        cond_layout.DefaultSpacing = Drawing.Size(5, 6)
+        cond_layout.Padding = Drawing.Padding(8)
+        
+        # Status label
+        self.lbl_cond_status = Forms.Label(Text="Load geometry from 'Blds' component to set conditioning status")
+        cond_layout.AddRow(self.lbl_cond_status)
+        
+        # Load button
+        self.btn_load_blds_cond = Forms.Button(Text="Load Blds Geometry")
+        cond_layout.AddRow(self.btn_load_blds_cond)
+        
+        cond_layout.AddSpace()
+        
+        # Grid for spaces with conditioning checkboxes
+        cond_layout.AddRow(Forms.Label(Text="Spaces (check = conditioned, uncheck = unconditioned):"))
+        
+        self.grid_cond = Forms.GridView()
+        self.grid_cond.Height = 280
+        self.grid_cond.AllowMultipleSelection = True
+        
+        # Column: Index
+        col_idx = Forms.GridColumn()
+        col_idx.HeaderText = "#"
+        col_idx.DataCell = Forms.TextBoxCell(0)
+        col_idx.Width = 35
+        col_idx.Editable = False
+        self.grid_cond.Columns.Add(col_idx)
+        
+        # Column: Name/ID
+        col_name = Forms.GridColumn()
+        col_name.HeaderText = "Space ID"
+        col_name.DataCell = Forms.TextBoxCell(1)
+        col_name.Width = 120
+        col_name.Editable = False
+        self.grid_cond.Columns.Add(col_name)
+        
+        # Column: Volume
+        col_vol = Forms.GridColumn()
+        col_vol.HeaderText = "Volume (m³)"
+        col_vol.DataCell = Forms.TextBoxCell(2)
+        col_vol.Width = 80
+        col_vol.Editable = False
+        self.grid_cond.Columns.Add(col_vol)
+        
+        # Column: Conditioned checkbox
+        col_cond = Forms.GridColumn()
+        col_cond.HeaderText = "Conditioned"
+        col_cond.DataCell = Forms.CheckBoxCell(3)
+        col_cond.Width = 80
+        col_cond.Editable = True
+        self.grid_cond.Columns.Add(col_cond)
+        
+        cond_layout.Add(self.grid_cond, xscale=True, yscale=True)
+        
+        # Preview button (own row)
+        self.btn_cond_preview = Forms.Button(Text="Preview Selection")
+        cond_layout.AddRow(self.btn_cond_preview)
+        
+        # Select All / Deselect All (50-50 split)
+        sel_row = Forms.DynamicLayout()
+        sel_row.BeginHorizontal()
+        self.btn_cond_select_all = Forms.Button(Text="Select All")
+        self.btn_cond_deselect_all = Forms.Button(Text="Deselect All")
+        sel_row.Add(self.btn_cond_select_all, xscale=True)
+        sel_row.Add(self.btn_cond_deselect_all, xscale=True)
+        sel_row.EndHorizontal()
+        cond_layout.AddRow(sel_row)
+        
+        cond_layout.AddSpace()
+        
+        # Apply button
+        self.btn_apply_cond = Forms.Button(Text="Apply to GH (GDS_Cond_Status)")
+        cond_layout.AddRow(self.btn_apply_cond)
+        
+        grp_cond.Content = cond_layout
+        col2_layout.Add(grp_cond, xscale=True, yscale=True)
+        
+        # Initialize conditioning data storage
+        self.cond_breps_data = []  # List of [index, name, volume, is_conditioned]
+        self.cond_breps = []       # Actual brep objects for preview
+        
+        # Store column references for dynamic sizing (4:6 ratio)
+        self._space_col_left = col1_layout
+        self._space_col_right = col2_layout
+        
+        columns.Add(col1_layout, xscale=False, yscale=True)
+        columns.Add(col2_layout, xscale=True, yscale=True)
+        columns.EndHorizontal()
+        
+        layout.Add(columns, xscale=True, yscale=True)
+        
+        # Bottom button bar (centered)
+        btn_bar_space = Forms.DynamicLayout()
+        btn_bar_space.BeginHorizontal()
+        btn_bar_space.Add(None)
+        self.btn_resync = Forms.Button(Text="Re-sync Outputs")
+        btn_bar_space.Add(self.btn_resync)
+        btn_bar_space.Add(None)
+        btn_bar_space.EndHorizontal()
+        layout.Add(btn_bar_space)
+        
+        self.tab_space.Content = layout
+    
+    def _create_envelope_module(self):
+        layout = Forms.DynamicLayout()
+        layout.DefaultSpacing = Drawing.Size(8, 8)
+        layout.Padding = Drawing.Padding(10)
+        
+        columns = Forms.DynamicLayout()
+        columns.DefaultSpacing = Drawing.Size(8, 0)
+        columns.BeginHorizontal()
+        
+        # ===== LEFT: Surface Selection =====
+        grp_surf = Forms.GroupBox(Text="Surface Selection")
+        surf_layout = Forms.DynamicLayout()
+        surf_layout.DefaultSpacing = Drawing.Size(5, 6)
+        surf_layout.Padding = Drawing.Padding(8)
+        
+        self.lbl_envelope_status = Forms.Label(Text="Select breps for envelope")
+        surf_layout.AddRow(self.lbl_envelope_status)
+        
+        self.btn_select_envelope = Forms.Button(Text="Select Breps from Rhino")
+        surf_layout.AddRow(self.btn_select_envelope)
+        
+        self.btn_use_space_breps = Forms.Button(Text="Use Space Module Breps")
+        surf_layout.AddRow(self.btn_use_space_breps)
+        
+        surf_layout.AddSpace()
+        
+        self.btn_deconstruct = Forms.Button(Text="Deconstruct to Faces")
+        self.btn_deconstruct.Enabled = False
+        surf_layout.AddRow(self.btn_deconstruct)
+        
+        surf_layout.AddRow(Forms.Label(Text="Faces (Ctrl+Click multi):"))
+        self.grid_faces = Forms.GridView()
+        self.grid_faces.Height = 280
+        self.grid_faces.AllowMultipleSelection = True
+        
+        col = Forms.GridColumn()
+        col.HeaderText = "Face Info"
+        col.DataCell = Forms.TextBoxCell(0)
+        col.Width = 110
+        self.grid_faces.Columns.Add(col)
+        
+        col_type = Forms.GridColumn()
+        col_type.HeaderText = "Type"
+        col_type.DataCell = Forms.TextBoxCell(1)
+        col_type.Width = 50
+        self.grid_faces.Columns.Add(col_type)
+        
+        surf_layout.Add(self.grid_faces, yscale=False)
+        
+        self.btn_preview = Forms.Button(Text="Preview Selection")
+        surf_layout.AddRow(self.btn_preview)
+        
+        self.lbl_selection = Forms.Label(Text="")
+        surf_layout.AddRow(self.lbl_selection)
+        grp_surf.Content = surf_layout
+        self._env_col_left = grp_surf
+        
+        # ===== MIDDLE: Aperture Definition =====
+        middle_layout = Forms.DynamicLayout()
+        middle_layout.DefaultSpacing = Drawing.Size(5, 6)
+        self._env_col_mid = middle_layout
+        
+        grp_ap = Forms.GroupBox(Text="Aperture Definition")
+        ap_layout = Forms.DynamicLayout()
+        ap_layout.DefaultSpacing = Drawing.Size(5, 6)
+        ap_layout.Padding = Drawing.Padding(8)
+        
+        mode_row = Forms.DynamicLayout()
+        mode_row.BeginHorizontal()
+        mode_row.Add(Forms.Label(Text="Mode:"))
+        self.dropdown_ap_mode = Forms.DropDown()
+        self.dropdown_ap_mode.Items.Add("By Ratio (WWR)")
+        self.dropdown_ap_mode.Items.Add("By Dimensions")
+        self.dropdown_ap_mode.SelectedIndex = 0
+        mode_row.Add(self.dropdown_ap_mode)
+        mode_row.EndHorizontal()
+        ap_layout.Add(mode_row)
+        
+        ap_layout.AddSpace()
+        
+        ap_layout.AddRow(Forms.Label(Text="Ratio (0.05-0.95):"))
+        self.num_ratio = Forms.NumericUpDown()
+        self.num_ratio.MinValue = 0.05
+        self.num_ratio.MaxValue = 0.95
+        self.num_ratio.DecimalPlaces = 2
+        self.num_ratio.Increment = 0.05
+        self.num_ratio.Value = 0.4
+        ap_layout.AddRow(self.num_ratio)
+        
+        ap_layout.AddSpace()
+        ap_layout.AddRow(Forms.Label(Text="Dimensions (W x H):"))
+        
+        dim_row = Forms.DynamicLayout()
+        dim_row.BeginHorizontal()
+        dim_row.Add(Forms.Label(Text="W:"))
+        self.num_width = Forms.NumericUpDown()
+        self.num_width.MinValue = 0.1
+        self.num_width.MaxValue = 100.0
+        self.num_width.DecimalPlaces = 2
+        self.num_width.Value = 1.5
+        self.num_width.Enabled = False
+        dim_row.Add(self.num_width)
+        dim_row.Add(Forms.Label(Text="H:"))
+        self.num_height = Forms.NumericUpDown()
+        self.num_height.MinValue = 0.1
+        self.num_height.MaxValue = 100.0
+        self.num_height.DecimalPlaces = 2
+        self.num_height.Value = 1.2
+        self.num_height.Enabled = False
+        dim_row.Add(self.num_height)
+        dim_row.EndHorizontal()
+        ap_layout.Add(dim_row)
+        
+        ap_layout.AddSpace()
+        self.btn_gen_aperture = Forms.Button(Text="Generate Aperture(s)")
+        ap_layout.AddRow(self.btn_gen_aperture)
+        
+        self.btn_bake_aperture = Forms.Button(Text="Bake to Layer")
+        ap_layout.AddRow(self.btn_bake_aperture)
+        
+        self.btn_send_to_gh = Forms.Button(Text="Apply to GH (Append)")
+        ap_layout.AddRow(self.btn_send_to_gh)
+        
+        # Clear buttons row (50-50 split)
+        clear_ap_row = Forms.DynamicLayout()
+        clear_ap_row.BeginHorizontal()
+        self.btn_clear_applied_ap = Forms.Button(Text="Clear GH")
+        self.btn_clear_baked_ap = Forms.Button(Text="Clear Geometry")
+        clear_ap_row.Add(self.btn_clear_applied_ap, xscale=True)
+        clear_ap_row.Add(self.btn_clear_baked_ap, xscale=True)
+        clear_ap_row.EndHorizontal()
+        ap_layout.Add(clear_ap_row)
+        
+        self.lbl_applied_ap_count = Forms.Label(Text="Applied: 0 aperture(s)")
+        ap_layout.AddRow(self.lbl_applied_ap_count)
+        
+        grp_ap.Content = ap_layout
+        
+        grp_preview = Forms.GroupBox(Text="Aperture Preview")
+        prev_layout = Forms.DynamicLayout()
+        prev_layout.DefaultSpacing = Drawing.Size(5, 4)
+        prev_layout.Padding = Drawing.Padding(8)
+        
+        self.txt_aperture_info = Forms.TextArea()
+        self.txt_aperture_info.ReadOnly = True
+        self.txt_aperture_info.Text = "Generated apertures info"
+        self.txt_aperture_info.Height = 150
+        try:
+            self.txt_aperture_info.Font = Drawing.Font("Consolas", 9)
+        except:
+            pass
+        prev_layout.Add(self.txt_aperture_info, xscale=True, yscale=True)
+        
+        self.lbl_aperture_status = Forms.Label(Text="")
+        prev_layout.AddRow(self.lbl_aperture_status)
+        grp_preview.Content = prev_layout
+        
+        middle_layout.Add(grp_ap, xscale=True, yscale=False)
+        middle_layout.Add(grp_preview, xscale=True, yscale=True)
+        
+        # ===== RIGHT: Door Definition =====
+        right_layout = Forms.DynamicLayout()
+        right_layout.DefaultSpacing = Drawing.Size(5, 6)
+        self._env_col_right = right_layout
+        
+        grp_door = Forms.GroupBox(Text="Door Definition")
+        door_layout = Forms.DynamicLayout()
+        door_layout.DefaultSpacing = Drawing.Size(5, 6)
+        door_layout.Padding = Drawing.Padding(8)
+        
+        door_mode_row = Forms.DynamicLayout()
+        door_mode_row.BeginHorizontal()
+        door_mode_row.Add(Forms.Label(Text="Mode:"))
+        self.dropdown_door_mode = Forms.DropDown()
+        self.dropdown_door_mode.Items.Add("By Ratio")
+        self.dropdown_door_mode.Items.Add("By Dimensions")
+        self.dropdown_door_mode.SelectedIndex = 1
+        door_mode_row.Add(self.dropdown_door_mode)
+        door_mode_row.EndHorizontal()
+        door_layout.Add(door_mode_row)
+        
+        door_layout.AddSpace()
+        
+        door_layout.AddRow(Forms.Label(Text="Ratio (0.05-0.95):"))
+        self.num_door_ratio = Forms.NumericUpDown()
+        self.num_door_ratio.MinValue = 0.05
+        self.num_door_ratio.MaxValue = 0.95
+        self.num_door_ratio.DecimalPlaces = 2
+        self.num_door_ratio.Increment = 0.05
+        self.num_door_ratio.Value = 0.3
+        self.num_door_ratio.Enabled = False
+        door_layout.AddRow(self.num_door_ratio)
+        
+        door_layout.AddSpace()
+        door_layout.AddRow(Forms.Label(Text="Dimensions (W x H):"))
+        
+        door_dim_row = Forms.DynamicLayout()
+        door_dim_row.BeginHorizontal()
+        door_dim_row.Add(Forms.Label(Text="W:"))
+        self.num_door_width = Forms.NumericUpDown()
+        self.num_door_width.MinValue = 0.1
+        self.num_door_width.MaxValue = 100.0
+        self.num_door_width.DecimalPlaces = 2
+        self.num_door_width.Value = 0.9
+        door_dim_row.Add(self.num_door_width)
+        door_dim_row.Add(Forms.Label(Text="H:"))
+        self.num_door_height = Forms.NumericUpDown()
+        self.num_door_height.MinValue = 0.1
+        self.num_door_height.MaxValue = 100.0
+        self.num_door_height.DecimalPlaces = 2
+        self.num_door_height.Value = 2.1
+        door_dim_row.Add(self.num_door_height)
+        door_dim_row.EndHorizontal()
+        door_layout.Add(door_dim_row)
+        
+        door_layout.AddSpace()
+        
+        sill_row = Forms.DynamicLayout()
+        sill_row.BeginHorizontal()
+        sill_row.Add(Forms.Label(Text="Sill Height:"))
+        self.num_door_sill = Forms.NumericUpDown()
+        self.num_door_sill.MinValue = 0.0
+        self.num_door_sill.MaxValue = 10.0
+        self.num_door_sill.DecimalPlaces = 2
+        self.num_door_sill.Value = 0.0
+        sill_row.Add(self.num_door_sill)
+        sill_row.Add(Forms.Label(Text="m"))
+        sill_row.EndHorizontal()
+        door_layout.Add(sill_row)
+        
+        door_layout.AddSpace()
+        self.btn_gen_door = Forms.Button(Text="Generate Door(s)")
+        door_layout.AddRow(self.btn_gen_door)
+        
+        self.btn_bake_door = Forms.Button(Text="Bake to Layer")
+        door_layout.AddRow(self.btn_bake_door)
+        
+        self.btn_send_door_to_gh = Forms.Button(Text="Apply to GH (Append)")
+        door_layout.AddRow(self.btn_send_door_to_gh)
+        
+        # Clear buttons row (50-50 split)
+        clear_door_row = Forms.DynamicLayout()
+        clear_door_row.BeginHorizontal()
+        self.btn_clear_applied_door = Forms.Button(Text="Clear GH")
+        self.btn_clear_baked_door = Forms.Button(Text="Clear Geometry")
+        clear_door_row.Add(self.btn_clear_applied_door, xscale=True)
+        clear_door_row.Add(self.btn_clear_baked_door, xscale=True)
+        clear_door_row.EndHorizontal()
+        door_layout.Add(clear_door_row)
+        
+        self.lbl_applied_door_count = Forms.Label(Text="Applied: 0 door(s)")
+        door_layout.AddRow(self.lbl_applied_door_count)
+        
+        grp_door.Content = door_layout
+        
+        grp_door_preview = Forms.GroupBox(Text="Door Preview")
+        door_prev_layout = Forms.DynamicLayout()
+        door_prev_layout.DefaultSpacing = Drawing.Size(5, 4)
+        door_prev_layout.Padding = Drawing.Padding(8)
+        
+        self.txt_door_info = Forms.TextArea()
+        self.txt_door_info.ReadOnly = True
+        self.txt_door_info.Text = "Generated doors info"
+        self.txt_door_info.Height = 150
+        try:
+            self.txt_door_info.Font = Drawing.Font("Consolas", 9)
+        except:
+            pass
+        door_prev_layout.Add(self.txt_door_info, xscale=True, yscale=True)
+        
+        self.lbl_door_status = Forms.Label(Text="")
+        door_prev_layout.AddRow(self.lbl_door_status)
+        grp_door_preview.Content = door_prev_layout
+        
+        right_layout.Add(grp_door, xscale=True, yscale=False)
+        right_layout.Add(grp_door_preview, xscale=True, yscale=True)
+        
+        columns.Add(grp_surf, xscale=False, yscale=True)
+        columns.Add(middle_layout, xscale=False, yscale=True)
+        columns.Add(right_layout, xscale=True, yscale=True)
+        columns.EndHorizontal()
+        
+        layout.Add(columns, xscale=True, yscale=True)
+        
+        self.tab_envelope.Content = layout
+    
+    def _create_schedule_module(self):
+        layout = Forms.DynamicLayout()
+        layout.DefaultSpacing = Drawing.Size(8, 8)
+        layout.Padding = Drawing.Padding(10)
+        
+        columns = Forms.DynamicLayout()
+        columns.DefaultSpacing = Drawing.Size(8, 0)
+        columns.BeginHorizontal()
+        
+        # ===== LEFT: Room Selection =====
+        grp_rooms = Forms.GroupBox(Text="Room Selection")
+        self._sched_col_left = grp_rooms  # Store reference for dynamic sizing
+        rooms_layout = Forms.DynamicLayout()
+        rooms_layout.DefaultSpacing = Drawing.Size(5, 5)
+        rooms_layout.Padding = Drawing.Padding(8)
+        
+        self.lbl_rooms_status = Forms.Label(Text="Load HB Rooms from GH")
+        rooms_layout.AddRow(self.lbl_rooms_status)
+        
+        self.btn_load_rooms = Forms.Button(Text="Load Rooms from GH")
+        rooms_layout.AddRow(self.btn_load_rooms)
+        
+        rooms_layout.AddSpace()
+        
+        # GDS Database reload
+        db_row = Forms.DynamicLayout()
+        db_row.BeginHorizontal()
+        self.btn_reload_gds = Forms.Button(Text="Reload GDS Database")
+        self.btn_reload_gds.Width = 130
+        db_row.Add(self.btn_reload_gds)
+        db_row.EndHorizontal()
+        rooms_layout.Add(db_row)
+        
+        self.lbl_gds_status = Forms.Label(Text="GDS: Not loaded")
+        rooms_layout.AddRow(self.lbl_gds_status)
+        
+        rooms_layout.AddSpace()
+        
+        rooms_layout.AddRow(Forms.Label(Text="Rooms (Ctrl+Click for multiple):"))
+        self.grid_rooms = Forms.GridView()
+        self.grid_rooms.Height = 180
+        self.grid_rooms.AllowMultipleSelection = True
+        
+        col_name = Forms.GridColumn()
+        col_name.HeaderText = "Room"
+        col_name.DataCell = Forms.TextBoxCell(0)
+        col_name.Width = 120
+        self.grid_rooms.Columns.Add(col_name)
+        
+        col_area = Forms.GridColumn()
+        col_area.HeaderText = "Area"
+        col_area.DataCell = Forms.TextBoxCell(1)
+        col_area.Width = 60
+        self.grid_rooms.Columns.Add(col_area)
+        
+        col_prog = Forms.GridColumn()
+        col_prog.HeaderText = "Current Program"
+        col_prog.DataCell = Forms.TextBoxCell(2)
+        col_prog.Width = 100
+        self.grid_rooms.Columns.Add(col_prog)
+        
+        rooms_layout.Add(self.grid_rooms, yscale=True)
+        
+        self.btn_preview_rooms = Forms.Button(Text="Preview Selection")
+        rooms_layout.AddRow(self.btn_preview_rooms)
+        
+        self.lbl_room_selection = Forms.Label(Text="")
+        rooms_layout.AddRow(self.lbl_room_selection)
+        
+        # Room examination panel
+        rooms_layout.AddRow(Forms.Label(Text="Selected Room Info:"))
+        self.txt_room_exam = Forms.TextArea()
+        self.txt_room_exam.ReadOnly = True
+        self.txt_room_exam.Height = 120
+        try:
+            self.txt_room_exam.Font = Drawing.Font("Consolas", 8)
+        except:
+            pass
+        rooms_layout.Add(self.txt_room_exam, xscale=True)
+        
+        grp_rooms.Content = rooms_layout
+        
+        # ===== MIDDLE: Program Definition (Scrollable) =====
+        middle_scrollable = Forms.Scrollable()
+        middle_scrollable.ExpandContentWidth = True
+        middle_scrollable.ExpandContentHeight = False
+        self._sched_col_mid = middle_scrollable  # Store reference for dynamic sizing
+        
+        middle_layout = Forms.DynamicLayout()
+        middle_layout.DefaultSpacing = Drawing.Size(5, 4)
+        
+        # Load Intensities
+        grp_loads = Forms.GroupBox(Text="Load Intensities")
+        loads_layout = Forms.DynamicLayout()
+        loads_layout.DefaultSpacing = Drawing.Size(5, 3)
+        loads_layout.Padding = Drawing.Padding(6)
+        
+        loads_layout.AddRow(Forms.Label(Text="Program Name:"))
+        self.txt_program_id = Forms.TextBox()
+        self.txt_program_id.Text = "GDS_Custom_Program"
+        loads_layout.AddRow(self.txt_program_id)
+        
+        preset_row = Forms.DynamicLayout()
+        preset_row.BeginHorizontal()
+        preset_row.Add(Forms.Label(Text="Preset:"))
+        self.dropdown_space_type = Forms.DropDown()
+        preset_row.Add(self.dropdown_space_type)
+        self.btn_apply_preset = Forms.Button(Text="Apply")
+        self.btn_apply_preset.Width = 45
+        preset_row.Add(self.btn_apply_preset)
+        preset_row.EndHorizontal()
+        loads_layout.Add(preset_row)
+        
+        def add_intensity_row(label, attr, unit, decimals=4, default=0.0):
+            row = Forms.DynamicLayout()
+            row.BeginHorizontal()
+            lbl = Forms.Label(Text=label)
+            lbl.Width = 75
+            row.Add(lbl)
+            num = Forms.NumericUpDown()
+            num.MinValue = 0
+            num.MaxValue = 1000
+            num.DecimalPlaces = decimals
+            num.Value = default
+            num.Width = 65
+            setattr(self, "num_" + attr, num)
+            row.Add(num)
+            row.Add(Forms.Label(Text=unit))
+            row.EndHorizontal()
+            loads_layout.Add(row)
+        
+        add_intensity_row("People:", "people_density", "p/m²", 4, 0.0565)
+        add_intensity_row("Lighting:", "lighting_power", "W/m²", 2, 10.76)
+        add_intensity_row("Elec Equip:", "equipment_power", "W/m²", 2, 10.76)
+        add_intensity_row("Gas Equip:", "gas_power", "W/m²", 2, 0.0)
+        add_intensity_row("Infiltration:", "infiltration", "m³/s/m²", 5, 0.0003)
+        add_intensity_row("Vent/Person:", "vent_person", "m³/s/p", 4, 0.006)
+        add_intensity_row("Vent/Area:", "vent_area", "m³/s/m²", 5, 0.0003)
+        
+        # ─── Service Hot Water separator ───
+        shw_sep = Forms.Label(Text="─── Service Hot Water ───")
+        shw_sep.TextAlignment = Forms.TextAlignment.Center
+        loads_layout.AddRow(shw_sep)
+        
+        # SHW Preset row
+        shw_preset_row = Forms.DynamicLayout()
+        shw_preset_row.BeginHorizontal()
+        shw_preset_row.Add(Forms.Label(Text="SHW Preset:"))
+        self.dd_shw_load_preset = Forms.DropDown()
+        for p in ["None", "Residential", "Residential - ABC Baseline", "Office", "Hotel"]:
+            self.dd_shw_load_preset.Items.Add(p)
+        self.dd_shw_load_preset.SelectedIndex = 0
+        self.dd_shw_load_preset.Width = 95
+        self.dd_shw_load_preset.Height = 21
+        shw_preset_row.Add(self.dd_shw_load_preset)
+        self.btn_apply_shw_preset = Forms.Button(Text="Apply")
+        self.btn_apply_shw_preset.Width = 45
+        shw_preset_row.Add(self.btn_apply_shw_preset)
+        shw_preset_row.EndHorizontal()
+        loads_layout.Add(shw_preset_row)
+        
+        # SHW intensity rows (reuse same pattern)
+        def add_shw_row(label, attr, unit, decimals=2, default=0.0, max_val=100):
+            row = Forms.DynamicLayout()
+            row.BeginHorizontal()
+            lbl = Forms.Label(Text=label)
+            lbl.Width = 75
+            row.Add(lbl)
+            num = Forms.NumericUpDown()
+            num.MinValue = 0
+            num.MaxValue = max_val
+            num.DecimalPlaces = decimals
+            num.Value = default
+            num.Width = 65
+            setattr(self, "num_shw_" + attr, num)
+            row.Add(num)
+            row.Add(Forms.Label(Text=unit))
+            row.EndHorizontal()
+            loads_layout.Add(row)
+        
+        add_shw_row("Flow/Area:", "flow", "L/h/m²", 3, 0.0, 1.0)
+        add_shw_row("Target Temp:", "temp", "°C", 1, 49.0, 100.0)
+        add_shw_row("Sensible:", "sensible", "", 2, 0.2, 1.0)
+        add_shw_row("Latent:", "latent", "", 2, 0.05, 1.0)
+        
+        # SHW Schedule dropdown
+        shw_sched_row = Forms.DynamicLayout()
+        shw_sched_row.BeginHorizontal()
+        lbl = Forms.Label(Text="SHW Sched:")
+        lbl.Width = 75
+        shw_sched_row.Add(lbl)
+        self.dd_shw_schedule = Forms.DropDown()
+        self.dd_shw_schedule.Width = 115
+        self.dd_shw_schedule.Height = 21
+        shw_sched_row.Add(self.dd_shw_schedule)
+        shw_sched_row.EndHorizontal()
+        loads_layout.Add(shw_sched_row)
+        
+        grp_loads.Content = loads_layout
+        middle_layout.Add(grp_loads, xscale=True)
+        
+        # Schedule Assignments
+        grp_sched = Forms.GroupBox(Text="Schedule Assignments")
+        sched_layout = Forms.DynamicLayout()
+        sched_layout.DefaultSpacing = Drawing.Size(5, 3)
+        sched_layout.Padding = Drawing.Padding(6)
+        
+        def add_schedule_row(label, attr):
+            row = Forms.DynamicLayout()
+            row.BeginHorizontal()
+            lbl = Forms.Label(Text=label)
+            lbl.Width = 70
+            row.Add(lbl)
+            dd = Forms.DropDown()
+            dd.Width = 115
+            dd.Height = 21
+            setattr(self, "dd_" + attr, dd)
+            row.Add(dd)
+            row.EndHorizontal()
+            sched_layout.Add(row)
+        
+        add_schedule_row("Occ (WD):", "occ_wd")
+        add_schedule_row("Occ (WE):", "occ_we")
+        add_schedule_row("Lighting:", "lighting")
+        add_schedule_row("Equipment:", "equipment")
+        add_schedule_row("Infiltration:", "infiltration")
+        add_schedule_row("Heating:", "heating")
+        add_schedule_row("Cooling:", "cooling")
+        add_schedule_row("Activity:", "activity")
+        
+        grp_sched.Content = sched_layout
+        middle_layout.Add(grp_sched, xscale=True, yscale=False)
+        
+        # Custom Schedule Editor (inline)
+        grp_custom = Forms.GroupBox(Text="Custom Schedule Editor")
+        custom_layout = Forms.DynamicLayout()
+        custom_layout.DefaultSpacing = Drawing.Size(3, 2)
+        custom_layout.Padding = Drawing.Padding(6)
+        
+        # Name and type row
+        name_type_row = Forms.DynamicLayout()
+        name_type_row.BeginHorizontal()
+        name_type_row.Add(Forms.Label(Text="Name:"))
+        self.txt_custom_sched_name = Forms.TextBox()
+        self.txt_custom_sched_name.Text = "My_Schedule"
+        self.txt_custom_sched_name.Width = 80
+        name_type_row.Add(self.txt_custom_sched_name)
+        name_type_row.Add(Forms.Label(Text="Type:"))
+        self.dd_custom_type = Forms.DropDown()
+        self.dd_custom_type.Items.Add("Fractional")
+        self.dd_custom_type.Items.Add("Setpoint")
+        self.dd_custom_type.Items.Add("Activity")
+        self.dd_custom_type.SelectedIndex = 0
+        self.dd_custom_type.Width = 70
+        self.dd_custom_type.Height = 21
+        name_type_row.Add(self.dd_custom_type)
+        name_type_row.EndHorizontal()
+        custom_layout.Add(name_type_row)
+        
+        # 24-hour values as single text input
+        custom_layout.AddRow(Forms.Label(Text="24 values (comma-separated):"))
+        self.txt_custom_values = Forms.TextArea()
+        self.txt_custom_values.Text = "0,0,0,0,0,0,0.1,0.2,0.95,0.95,0.95,0.5,0.95,0.95,0.95,0.95,0.95,0.3,0.1,0,0,0,0,0"
+        self.txt_custom_values.Height = 36
+        custom_layout.Add(self.txt_custom_values, xscale=True)
+        
+        # Quick fill buttons
+        fill_row = Forms.DynamicLayout()
+        fill_row.BeginHorizontal()
+        self.btn_fill_office = Forms.Button(Text="Office")
+        self.btn_fill_office.Width = 50
+        fill_row.Add(self.btn_fill_office)
+        self.btn_fill_residential = Forms.Button(Text="Resid")
+        self.btn_fill_residential.Width = 50
+        fill_row.Add(self.btn_fill_residential)
+        self.btn_fill_constant = Forms.Button(Text="Const")
+        self.btn_fill_constant.Width = 50
+        fill_row.Add(self.btn_fill_constant)
+        fill_row.Add(None)
+        fill_row.EndHorizontal()
+        custom_layout.Add(fill_row)
+        
+        # Save button
+        save_row = Forms.DynamicLayout()
+        save_row.BeginHorizontal()
+        self.btn_save_custom = Forms.Button(Text="Save to GH Panel")
+        save_row.Add(self.btn_save_custom)
+        self.btn_load_custom = Forms.Button(Text="Load from GH")
+        save_row.Add(self.btn_load_custom)
+        save_row.Add(None)
+        save_row.EndHorizontal()
+        custom_layout.Add(save_row)
+        
+        self.lbl_custom_status = Forms.Label(Text="")
+        custom_layout.AddRow(self.lbl_custom_status)
+        
+        grp_custom.Content = custom_layout
+        middle_layout.Add(grp_custom, xscale=True, yscale=True)
+        
+        # ===== RIGHT: Preview & Actions =====
+        right_layout = Forms.DynamicLayout()
+        right_layout.DefaultSpacing = Drawing.Size(5, 6)
+        
+        grp_summary = create_shaded_groupbox("Program Summary")
+        summary_layout = Forms.DynamicLayout()
+        summary_layout.Padding = Drawing.Padding(4)
+        summary_layout.BackgroundColor = RESULT_BG_COLOR
+        
+        self.txt_program_summary = Forms.TextArea()
+        self.txt_program_summary.ReadOnly = True
+        self.txt_program_summary.Height = 220
+        try:
+            self.txt_program_summary.Font = Drawing.Font("Consolas", 8)
+        except:
+            pass
+        summary_layout.Add(self.txt_program_summary, xscale=True, yscale=True)
+        grp_summary.Content = summary_layout
+        
+        grp_json = create_shaded_groupbox("JSON Preview")
+        json_layout = Forms.DynamicLayout()
+        json_layout.Padding = Drawing.Padding(4)
+        json_layout.BackgroundColor = RESULT_BG_COLOR
+        
+        self.txt_json_output = Forms.TextArea()
+        self.txt_json_output.ReadOnly = True
+        try:
+            self.txt_json_output.Font = Drawing.Font("Consolas", 8)
+        except:
+            pass
+        json_layout.Add(self.txt_json_output, xscale=True, yscale=True)
+        grp_json.Content = json_layout
+        
+        right_split = Forms.Splitter()
+        right_split.Orientation = Forms.Orientation.Vertical
+        right_split.FixedPanel = Forms.SplitterFixedPanel(0)
+        right_split.Panel1 = grp_summary
+        right_split.Panel2 = grp_json
+        right_split.Position = 240
+        
+        right_layout.Add(right_split, xscale=True, yscale=True)
+        
+        middle_scrollable.Content = middle_layout
+        
+        columns.Add(grp_rooms, xscale=False, yscale=True)
+        columns.Add(middle_scrollable, xscale=False, yscale=True)
+        columns.Add(right_layout, xscale=True, yscale=True)
+        columns.EndHorizontal()
+        
+        layout.Add(columns, xscale=True, yscale=True)
+        
+        # Bottom buttons
+        btn_bar = Forms.DynamicLayout()
+        btn_bar.BeginHorizontal()
+        btn_bar.Add(None)
+        self.btn_preview_program = Forms.Button(Text="Preview Program")
+        self.btn_assign_program = Forms.Button(Text="Assign to Selected Rooms")
+        self.btn_clear_pending = Forms.Button(Text="Clear Pending")
+        self.btn_output_programs = Forms.Button(Text="Apply")
+        self.btn_export_json = Forms.Button(Text="Export JSON")
+        btn_bar.Add(self.btn_preview_program)
+        btn_bar.Add(self.btn_assign_program)
+        btn_bar.Add(self.btn_clear_pending)
+        # Spacer between workflow buttons and output buttons
+        spacer = Forms.Label(Text="   |   ")
+        btn_bar.Add(spacer)
+        btn_bar.Add(self.btn_output_programs)
+        btn_bar.Add(self.btn_export_json)
+        btn_bar.Add(None)
+        # Initialization status label
+        self.lbl_init_status = Forms.Label(Text="")
+        self.lbl_init_status.TextColor = Drawing.Color.FromArgb(80, 80, 80)  # Gray initially
+        btn_bar.Add(self.lbl_init_status)
+        btn_bar.EndHorizontal()
+        layout.Add(btn_bar)
+        
+        self.tab_schedule.Content = layout
+        
+        # Initialize dropdowns with presets
+        self._populate_schedule_dropdowns()
+    
+    def _populate_schedule_dropdowns(self):
+        """Populate all schedule dropdowns with presets, GDS, HB library, and custom items"""
+        def populate_dd(dd, presets, gds_source=None, hb_filter=None, custom_type=None):
+            current = str(dd.SelectedValue) if dd.SelectedIndex >= 0 else None
+            dd.Items.Clear()
+            
+            # Add hardcoded presets first
+            for p in presets.keys():
+                dd.Items.Add(p)
+            
+            # Add saved custom schedules
+            if self.saved_custom_schedules:
+                for name, data in self.saved_custom_schedules.items():
+                    # Filter by type if specified
+                    if custom_type:
+                        sched_type = data.get("type", "fractional")
+                        if custom_type == "setpoint" and sched_type not in ["setpoint", "temperature"]:
+                            continue
+                        elif custom_type == "activity" and sched_type != "activity":
+                            continue
+                        elif custom_type == "fractional" and sched_type not in ["fractional", ""]:
+                            continue
+                    dd.Items.Add("Custom:" + name)
+            
+            # Add GDS items
+            if gds_source:
+                for name in sorted(gds_source.keys()):
+                    dd.Items.Add("[GDS] " + name)
+            
+            # Add HB library items
+            if self.hb_library_schedules and hb_filter:
+                for sched_id in self.hb_library_schedules:
+                    if hb_filter(sched_id):
+                        dd.Items.Add("[HB] " + sched_id)
+            
+            if dd.Items.Count > 0:
+                dd.SelectedIndex = 0
+            
+            # Restore selection if possible
+            if current:
+                for i in range(dd.Items.Count):
+                    if str(dd.Items[i]) == current:
+                        dd.SelectedIndex = i
+                        break
+        
+        gds_sched = self.gds_parser.schedules if self.gds_parser else {}
+        gds_setp = self.gds_parser.setpoints if self.gds_parser else {}
+        
+        populate_dd(self.dd_occ_wd, SCHEDULE_PRESETS, gds_sched, lambda x: 'occ' in x.lower(), "fractional")
+        populate_dd(self.dd_occ_we, SCHEDULE_PRESETS, gds_sched, lambda x: 'occ' in x.lower(), "fractional")
+        populate_dd(self.dd_lighting, SCHEDULE_PRESETS, gds_sched, lambda x: 'light' in x.lower(), "fractional")
+        populate_dd(self.dd_equipment, SCHEDULE_PRESETS, gds_sched, lambda x: 'equip' in x.lower() or 'plug' in x.lower(), "fractional")
+        populate_dd(self.dd_infiltration, SCHEDULE_PRESETS, gds_sched, lambda x: 'infil' in x.lower(), "fractional")
+        populate_dd(self.dd_heating, SETPOINT_PRESETS, gds_setp, lambda x: 'htg' in x.lower() or 'heat' in x.lower(), "setpoint")
+        populate_dd(self.dd_cooling, SETPOINT_PRESETS, gds_setp, lambda x: 'clg' in x.lower() or 'cool' in x.lower(), "setpoint")
+        populate_dd(self.dd_activity, ACTIVITY_PRESETS, {}, lambda x: 'activity' in x.lower(), "activity")
+        
+        # SHW Schedule dropdown
+        if hasattr(self, 'dd_shw_schedule'):
+            self.dd_shw_schedule.Items.Clear()
+            for s in ["Residential", "Office Weekday", "Always On"]:
+                self.dd_shw_schedule.Items.Add(s)
+            if self.gds_parser and self.gds_parser.schedules:
+                for name in sorted(self.gds_parser.schedules.keys()):
+                    self.dd_shw_schedule.Items.Add("[GDS] " + name)
+            if self.dd_shw_schedule.Items.Count > 0:
+                self.dd_shw_schedule.SelectedIndex = 0
+        
+        # Update intensity dropdown
+        self.dropdown_space_type.Items.Clear()
+        for st in ["Office", "Retail", "Residential", "Laboratory", "Hospital"]:
+            self.dropdown_space_type.Items.Add(st)
+        if self.gds_parser and self.gds_parser.intensities:
+            for name in sorted(self.gds_parser.intensities.keys()):
+                self.dropdown_space_type.Items.Add("[GDS] " + name)
+        if self.dropdown_space_type.Items.Count > 0:
+            self.dropdown_space_type.SelectedIndex = 0
+    
+    def _create_hvac_module(self):
+        """Simple HVAC module"""
+        layout = Forms.DynamicLayout()
+        layout.DefaultSpacing = Drawing.Size(10, 10)
+        layout.Padding = Drawing.Padding(15)
+        
+        layout.AddRow(Forms.Label(Text="Set default HVAC system for all rooms:"))
+        
+        layout.AddRow(Forms.Label(Text="Building Type:"))
+        self.dd_hvac_preset = Forms.DropDown()
+        self.dd_hvac_preset.Items.Add("Office - Standard")
+        self.dd_hvac_preset.Items.Add("Office - High Efficiency")
+        self.dd_hvac_preset.Items.Add("Residential")
+        self.dd_hvac_preset.Items.Add("Retail")
+        self.dd_hvac_preset.Items.Add("Hotel")
+        self.dd_hvac_preset.Items.Add("School")
+        self.dd_hvac_preset.Items.Add("Hospital")
+        self.dd_hvac_preset.Items.Add("Ideal Air (Loads Only)")
+        self.dd_hvac_preset.SelectedIndex = 0
+        layout.AddRow(self.dd_hvac_preset)
+        
+        layout.AddSpace()
+        
+        layout.AddRow(Forms.Label(Text="System Details:"))
+        self.txt_hvac_details = Forms.TextArea()
+        self.txt_hvac_details.ReadOnly = True
+        self.txt_hvac_details.Height = 150
+        layout.Add(self.txt_hvac_details, xscale=True, yscale=True)
+        
+        layout.AddSpace()
+        
+        self.btn_hvac_set = Forms.Button(Text="Set as Default for All Rooms")
+        layout.AddRow(self.btn_hvac_set)
+        
+        self.lbl_hvac_status = Forms.Label(Text="")
+        layout.AddRow(self.lbl_hvac_status)
+        
+        layout.AddRow(Forms.Label(Text="For room-by-room HVAC, use GDS GBE Refiner."))
+        
+        self.tab_hvac.Content = layout
+    
+    def _create_site_module(self):
+        """Module 5: Site + Weather + Renewables (HB Native)
+        Layout: 3 columns (4:3:3 ratio)
+        - Column 1: Site Definition (top) + Weather Definition (bottom) stacked
+        - Column 2: Renewable Energy tabs (PV + SHW)
+        - Column 3: System Summary
+        """
+        layout = Forms.DynamicLayout()
+        layout.DefaultSpacing = Drawing.Size(8, 8)
+        layout.Padding = Drawing.Padding(10)
+        
+        columns = Forms.DynamicLayout()
+        columns.DefaultSpacing = Drawing.Size(8, 0)
+        columns.BeginHorizontal()
+        
+        # ========== COLUMN 1: Site + Weather (Stacked) ==========
+        col1_layout = Forms.DynamicLayout()
+        col1_layout.DefaultSpacing = Drawing.Size(0, 8)
+        
+        # --- Site Definition (Top) ---
+        grp_site = Forms.GroupBox(Text="Site Definition")
+        site_layout = Forms.DynamicLayout()
+        site_layout.DefaultSpacing = Drawing.Size(5, 5)
+        site_layout.Padding = Drawing.Padding(8)
+        
+        # Include context geometry checkbox (at top)
+        self.chk_inc_context = Forms.CheckBox(Text="Include context geometry in simulation")
+        self.chk_inc_context.Checked = get_toggles_aggregate(NAME_INC_CONTEXT)
+        self.chk_inc_context.ToolTip = "When enabled, context geometry (surrounding buildings, terrain)\nwill be included as shading surfaces in the Model.\nDisable to speed up simulation or isolate building performance."
+        site_layout.AddRow(self.chk_inc_context)
+        
+        site_layout.AddRow(Forms.Label(Text="Site Context Path:"))
+        self.txt_site_context = Forms.TextArea()
+        self.txt_site_context.Text = get_first_input_panel_text(NAME_SITE_CONTEXT)
+        self.txt_site_context.Height = 40
+        site_layout.Add(self.txt_site_context, xscale=True)
+        
+        site_layout.AddRow(Forms.Label(Text="Site Name:"))
+        self.txt_site_name = Forms.TextArea()
+        self.txt_site_name.Text = get_first_input_panel_text(NAME_SITE_NAME)
+        self.txt_site_name.Height = 25
+        site_layout.Add(self.txt_site_name, xscale=True)
+        
+        site_idx_info = get_slider_info(NAME_SITE_INDEX, 0)
+        idx_row = Forms.DynamicLayout()
+        idx_row.BeginHorizontal()
+        idx_row.Add(Forms.Label(Text="Site Index:"))
+        self.num_site_index = Forms.NumericUpDown()
+        self.num_site_index.MinValue = site_idx_info[0]
+        self.num_site_index.MaxValue = site_idx_info[1]
+        self.num_site_index.DecimalPlaces = site_idx_info[0]
+        self.num_site_index.Increment = 1
+        self.num_site_index.Value = site_idx_info[2]
+        self.num_site_index.Width = 60
+        idx_row.Add(self.num_site_index)
+        idx_row.Add(None)
+        idx_row.EndHorizontal()
+        site_layout.Add(idx_row)
+        
+        site_btn_row = Forms.DynamicLayout()
+        site_btn_row.BeginHorizontal()
+        self.btn_site_apply = Forms.Button(Text="Apply")
+        self.btn_site_apply.Width = 60
+        site_btn_row.Add(self.btn_site_apply)
+        self.btn_site_overwrite = Forms.Button(Text="Overwrite")
+        self.btn_site_overwrite.Width = 70
+        site_btn_row.Add(self.btn_site_overwrite)
+        site_btn_row.Add(None)
+        site_btn_row.EndHorizontal()
+        site_layout.Add(site_btn_row)
+        
+        # Add spacer to prevent buttons from stretching vertically
+        site_layout.Add(None, yscale=True)
+        
+        grp_site.Content = site_layout
+        
+        # --- Weather Definition (Bottom) ---
+        grp_weather = Forms.GroupBox(Text="Weather Definition")
+        weather_layout = Forms.DynamicLayout()
+        weather_layout.DefaultSpacing = Drawing.Size(5, 5)
+        weather_layout.Padding = Drawing.Padding(8)
+        
+        weather_layout.AddRow(Forms.Label(Text="Weather File Path (EPW):"))
+        self.txt_weather_path = Forms.TextArea()
+        self.txt_weather_path.Text = get_first_input_panel_text(NAME_WEATHER_PATH)
+        self.txt_weather_path.Height = 50
+        weather_layout.Add(self.txt_weather_path, xscale=True)
+        
+        self.btn_weather_apply = Forms.Button(Text="Apply Weather Path")
+        weather_layout.AddRow(self.btn_weather_apply)
+        
+        weather_layout.Add(None, yscale=True)
+        grp_weather.Content = weather_layout
+        
+        # Stack Site and Weather using splitter (1:1 height ratio)
+        self._site_col1_split = Forms.Splitter()
+        self._site_col1_split.Orientation = Forms.Orientation.Vertical
+        self._site_col1_split.Panel1 = grp_site
+        self._site_col1_split.Panel2 = grp_weather
+        self._site_col1_split.Position = 180
+        
+        col1_layout.Add(self._site_col1_split, xscale=True, yscale=True)
+        
+        # ========== COLUMN 2: Renewable Energy (PV + SHW tabs) ==========
+        grp_renewables = Forms.GroupBox(Text="Renewable Energy (HB Native)")
+        renewables_layout = Forms.DynamicLayout()
+        renewables_layout.Padding = Drawing.Padding(4)
+        
+        self.tab_site_renewables = Forms.TabControl()
+        
+        # -------- PV TAB --------
+        tab_pv = Forms.TabPage(Text="Photovoltaic")
+        pv_layout = Forms.DynamicLayout()
+        pv_layout.DefaultSpacing = Drawing.Size(4, 4)
+        pv_layout.Padding = Drawing.Padding(6)
+        
+        # Preset selection
+        preset_row = Forms.DynamicLayout()
+        preset_row.BeginHorizontal()
+        preset_row.Add(Forms.Label(Text="Preset:"))
+        self.dd_pv_preset = Forms.DropDown()
+        self.dd_pv_preset.Width = 130
+        self.dd_pv_preset.Height = 21
+        for preset in PV_PRESETS.keys():
+            self.dd_pv_preset.Items.Add(preset)
+        self.dd_pv_preset.SelectedIndex = 0
+        preset_row.Add(self.dd_pv_preset)
+        preset_row.Add(None)
+        preset_row.EndHorizontal()
+        pv_layout.Add(preset_row)
+        
+        # Efficiency and Active Area
+        eff_row = Forms.DynamicLayout()
+        eff_row.BeginHorizontal()
+        eff_row.Add(Forms.Label(Text="Eff:"))
+        self.num_pv_efficiency = Forms.NumericUpDown()
+        self.num_pv_efficiency.MinValue = 0.05
+        self.num_pv_efficiency.MaxValue = 0.25
+        self.num_pv_efficiency.DecimalPlaces = 2
+        self.num_pv_efficiency.Increment = 0.01
+        self.num_pv_efficiency.Value = 0.15
+        self.num_pv_efficiency.Width = 55
+        eff_row.Add(self.num_pv_efficiency)
+        eff_row.Add(Forms.Label(Text="Active:"))
+        self.num_pv_active = Forms.NumericUpDown()
+        self.num_pv_active.MinValue = 0.5
+        self.num_pv_active.MaxValue = 1.0
+        self.num_pv_active.DecimalPlaces = 2
+        self.num_pv_active.Increment = 0.05
+        self.num_pv_active.Value = 0.9
+        self.num_pv_active.Width = 50
+        eff_row.Add(self.num_pv_active)
+        eff_row.Add(None)
+        eff_row.EndHorizontal()
+        pv_layout.Add(eff_row)
+        
+        # Module type and Loss fraction
+        mod_row = Forms.DynamicLayout()
+        mod_row.BeginHorizontal()
+        mod_row.Add(Forms.Label(Text="Module:"))
+        self.dd_pv_module_type = Forms.DropDown()
+        self.dd_pv_module_type.Width = 75
+        self.dd_pv_module_type.Height = 21
+        for mt in PV_MODULE_TYPES:
+            self.dd_pv_module_type.Items.Add(mt)
+        self.dd_pv_module_type.SelectedIndex = 0
+        mod_row.Add(self.dd_pv_module_type)
+        mod_row.Add(Forms.Label(Text="Loss:"))
+        self.num_pv_loss = Forms.NumericUpDown()
+        self.num_pv_loss.MinValue = 0.0
+        self.num_pv_loss.MaxValue = 0.5
+        self.num_pv_loss.DecimalPlaces = 2
+        self.num_pv_loss.Increment = 0.01
+        self.num_pv_loss.Value = 0.14
+        self.num_pv_loss.Width = 50
+        mod_row.Add(self.num_pv_loss)
+        mod_row.Add(None)
+        mod_row.EndHorizontal()
+        pv_layout.Add(mod_row)
+        
+        # Mounting type
+        mount_row = Forms.DynamicLayout()
+        mount_row.BeginHorizontal()
+        mount_row.Add(Forms.Label(Text="Mounting:"))
+        self.dd_pv_mounting = Forms.DropDown()
+        self.dd_pv_mounting.Width = 120
+        self.dd_pv_mounting.Height = 21
+        for mt in PV_MOUNTING_TYPES:
+            self.dd_pv_mounting.Items.Add(mt)
+        self.dd_pv_mounting.SelectedIndex = 0
+        mount_row.Add(self.dd_pv_mounting)
+        mount_row.Add(None)
+        mount_row.EndHorizontal()
+        pv_layout.Add(mount_row)
+        
+        # Tracking GCR (only for OneAxis)
+        gcr_row = Forms.DynamicLayout()
+        gcr_row.BeginHorizontal()
+        gcr_row.Add(Forms.Label(Text="GCR:"))
+        self.num_pv_gcr = Forms.NumericUpDown()
+        self.num_pv_gcr.MinValue = 0.1
+        self.num_pv_gcr.MaxValue = 0.9
+        self.num_pv_gcr.DecimalPlaces = 2
+        self.num_pv_gcr.Increment = 0.05
+        self.num_pv_gcr.Value = 0.4
+        self.num_pv_gcr.Width = 50
+        self.num_pv_gcr.Enabled = False
+        gcr_row.Add(self.num_pv_gcr)
+        self.lbl_gcr_note = Forms.Label(Text="(OneAxis only)")
+        gcr_row.Add(self.lbl_gcr_note)
+        gcr_row.Add(None)
+        gcr_row.EndHorizontal()
+        pv_layout.Add(gcr_row)
+        
+        pv_layout.AddSpace()
+        
+        # Shade selection
+        pv_layout.AddRow(Forms.Label(Text="PV Surfaces (HB Shades):"))
+        
+        shade_btn_row = Forms.DynamicLayout()
+        shade_btn_row.BeginHorizontal()
+        self.btn_load_pv_shades = Forms.Button(Text="Load")
+        self.btn_load_pv_shades.Width = 50
+        shade_btn_row.Add(self.btn_load_pv_shades)
+        self.btn_pick_pv_shades = Forms.Button(Text="Pick")
+        self.btn_pick_pv_shades.Width = 45
+        shade_btn_row.Add(self.btn_pick_pv_shades)
+        shade_btn_row.Add(None)
+        shade_btn_row.EndHorizontal()
+        pv_layout.Add(shade_btn_row)
+        
+        self.lbl_pv_shade_status = Forms.Label(Text="0 shades (0 m²)")
+        pv_layout.AddRow(self.lbl_pv_shade_status)
+        
+        # Action buttons
+        pv_action_row = Forms.DynamicLayout()
+        pv_action_row.BeginHorizontal()
+        self.btn_apply_pv = Forms.Button(Text="Apply PV")
+        self.btn_apply_pv.Width = 70
+        pv_action_row.Add(self.btn_apply_pv)
+        self.btn_clear_pv = Forms.Button(Text="Clear")
+        self.btn_clear_pv.Width = 50
+        pv_action_row.Add(self.btn_clear_pv)
+        pv_action_row.Add(None)
+        pv_action_row.EndHorizontal()
+        pv_layout.Add(pv_action_row)
+        
+        pv_layout.Add(None, yscale=True)
+        
+        tab_pv.Content = pv_layout
+        self.tab_site_renewables.Pages.Add(tab_pv)
+        
+        # -------- SOLAR HOT WATER TAB --------
+        tab_solhw = Forms.TabPage(Text="Solar Hot Water")
+        solhw_layout = Forms.DynamicLayout()
+        solhw_layout.DefaultSpacing = Drawing.Size(4, 4)
+        solhw_layout.Padding = Drawing.Padding(6)
+        
+        solhw_layout.AddRow(Forms.Label(Text="Solar Hot Water (HB SHW)"))
+        solhw_layout.AddSpace()
+        
+        # Equipment type
+        equip_row = Forms.DynamicLayout()
+        equip_row.BeginHorizontal()
+        equip_row.Add(Forms.Label(Text="Equipment:"))
+        self.dd_solhw_equipment = Forms.DropDown()
+        self.dd_solhw_equipment.Width = 140
+        solhw_equipment_types = [
+            "Gas_WaterHeater",
+            "Electric_WaterHeater",
+            "HeatPump_WaterHeater",
+            "Gas_TanklessHeater",
+            "Electric_TanklessHeater",
+        ]
+        for eq in solhw_equipment_types:
+            self.dd_solhw_equipment.Items.Add(eq)
+        self.dd_solhw_equipment.SelectedIndex = 0
+        equip_row.Add(self.dd_solhw_equipment)
+        equip_row.Add(None)
+        equip_row.EndHorizontal()
+        solhw_layout.Add(equip_row)
+        
+        # Collector preset
+        solhw_preset_row = Forms.DynamicLayout()
+        solhw_preset_row.BeginHorizontal()
+        solhw_preset_row.Add(Forms.Label(Text="Collector:"))
+        self.dd_solhw_preset = Forms.DropDown()
+        self.dd_solhw_preset.Width = 140
+        for preset in SOLHW_PRESETS.keys():
+            self.dd_solhw_preset.Items.Add(preset)
+        self.dd_solhw_preset.SelectedIndex = 0
+        solhw_preset_row.Add(self.dd_solhw_preset)
+        solhw_preset_row.Add(None)
+        solhw_preset_row.EndHorizontal()
+        solhw_layout.Add(solhw_preset_row)
+        
+        # Area and Efficiency
+        solhw_area_row = Forms.DynamicLayout()
+        solhw_area_row.BeginHorizontal()
+        solhw_area_row.Add(Forms.Label(Text="Area (m²):"))
+        self.num_solhw_area = Forms.NumericUpDown()
+        self.num_solhw_area.MinValue = 1
+        self.num_solhw_area.MaxValue = 100
+        self.num_solhw_area.Value = 4
+        self.num_solhw_area.Width = 50
+        solhw_area_row.Add(self.num_solhw_area)
+        solhw_area_row.Add(Forms.Label(Text="Eff:"))
+        self.num_solhw_efficiency = Forms.NumericUpDown()
+        self.num_solhw_efficiency.MinValue = 0.3
+        self.num_solhw_efficiency.MaxValue = 0.8
+        self.num_solhw_efficiency.DecimalPlaces = 2
+        self.num_solhw_efficiency.Value = 0.50
+        self.num_solhw_efficiency.Width = 50
+        solhw_area_row.Add(self.num_solhw_efficiency)
+        solhw_area_row.Add(None)
+        solhw_area_row.EndHorizontal()
+        solhw_layout.Add(solhw_area_row)
+        
+        solhw_layout.AddSpace()
+        
+        self.chk_solhw_enable = Forms.CheckBox(Text="Enable Solar Hot Water")
+        solhw_layout.AddRow(self.chk_solhw_enable)
+        
+        solhw_layout.AddSpace()
+        
+        self.btn_apply_solhw = Forms.Button(Text="Apply Solar HW Config")
+        solhw_layout.AddRow(self.btn_apply_solhw)
+        
+        solhw_layout.AddSpace()
+        solhw_layout.AddRow(Forms.Label(Text="Use with HB SHW System"))
+        
+        solhw_layout.Add(None, yscale=True)
+        
+        tab_solhw.Content = solhw_layout
+        self.tab_site_renewables.Pages.Add(tab_solhw)
+        
+        renewables_layout.Add(self.tab_site_renewables, xscale=True, yscale=True)
+        grp_renewables.Content = renewables_layout
+        
+        # ========== COLUMN 3: System Summary ==========
+        grp_results = create_shaded_groupbox("System Summary")
+        results_layout = Forms.DynamicLayout()
+        results_layout.Padding = Drawing.Padding(4)
+        results_layout.BackgroundColor = RESULT_BG_COLOR
+        
+        self.txt_pv_summary = Forms.TextArea()
+        self.txt_pv_summary.ReadOnly = True
+        try:
+            self.txt_pv_summary.Font = Drawing.Font("Consolas", 9)
+        except:
+            pass
+        self.txt_pv_summary.Text = "No renewable systems configured.\n\nPV: Select shades, Apply PV\nSolar HW: Enable, Apply Config\n\nFor Battery & Wind (IDF),\nsee Module 6: Advanced."
+        results_layout.Add(self.txt_pv_summary, xscale=True, yscale=True)
+        grp_results.Content = results_layout
+        
+        # Store column references for dynamic sizing (4:3:3 ratio)
+        self._site_col_left = col1_layout
+        self._site_col_mid = grp_renewables
+        self._site_col_right = grp_results
+        
+        columns.Add(col1_layout, xscale=False, yscale=True)
+        columns.Add(grp_renewables, xscale=False, yscale=True)
+        columns.Add(grp_results, xscale=True, yscale=True)
+        columns.EndHorizontal()
+        
+        layout.Add(columns, xscale=True, yscale=True)
+        
+        btn_bar_site = Forms.DynamicLayout()
+        btn_bar_site.BeginHorizontal()
+        btn_bar_site.Add(None)
+        self.btn_site_resync = Forms.Button(Text="Re-sync Outputs")
+        btn_bar_site.Add(self.btn_site_resync)
+        btn_bar_site.Add(None)
+        btn_bar_site.EndHorizontal()
+        layout.Add(btn_bar_site)
+        
+        self.tab_site.Content = layout
+    
+    def _create_renewables_module(self):
+        """Module 6: Advanced (IDF Injection) - Battery and Wind only
+        Layout: Two columns (3:1 ratio) - Config tabs | IDF Preview
+        """
+        layout = Forms.DynamicLayout()
+        layout.DefaultSpacing = Drawing.Size(8, 8)
+        layout.Padding = Drawing.Padding(10)
+        
+        # Two-column layout
+        columns = Forms.DynamicLayout()
+        columns.BeginHorizontal()
+        
+        # ========== LEFT COLUMN (3): Configuration Tabs ==========
+        grp_config = Forms.GroupBox(Text="System Configuration")
+        config_layout = Forms.DynamicLayout()
+        config_layout.Padding = Drawing.Padding(4)
+        
+        self.tab_renewables_systems = Forms.TabControl()
+        
+        # -------- BATTERY TAB --------
+        tab_battery = Forms.TabPage(Text="Battery Storage")
+        batt_layout = Forms.DynamicLayout()
+        batt_layout.DefaultSpacing = Drawing.Size(5, 6)
+        batt_layout.Padding = Drawing.Padding(8)
+        
+        batt_layout.AddRow(Forms.Label(Text="Battery Energy Storage System"))
+        batt_layout.AddSpace()
+        
+        # Enable checkbox
+        self.chk_battery = Forms.CheckBox(Text="Enable Battery Storage")
+        batt_layout.AddRow(self.chk_battery)
+        batt_layout.AddSpace()
+        
+        # Preset
+        batt_preset_row = Forms.DynamicLayout()
+        batt_preset_row.BeginHorizontal()
+        batt_preset_row.Add(Forms.Label(Text="Preset:"))
+        self.dd_batt_preset = Forms.DropDown()
+        self.dd_batt_preset.Width = 180
+        for preset in BATTERY_PRESETS.keys():
+            self.dd_batt_preset.Items.Add(preset)
+        self.dd_batt_preset.SelectedIndex = 1
+        batt_preset_row.Add(self.dd_batt_preset)
+        batt_preset_row.Add(None)
+        batt_preset_row.EndHorizontal()
+        batt_layout.Add(batt_preset_row)
+        
+        # Capacity
+        batt_cap_row = Forms.DynamicLayout()
+        batt_cap_row.BeginHorizontal()
+        batt_cap_row.Add(Forms.Label(Text="Capacity (kWh):"))
+        self.num_batt_capacity = Forms.NumericUpDown()
+        self.num_batt_capacity.MinValue = 1
+        self.num_batt_capacity.MaxValue = 1000
+        self.num_batt_capacity.DecimalPlaces = 1
+        self.num_batt_capacity.Value = 13.5
+        self.num_batt_capacity.Width = 70
+        batt_cap_row.Add(self.num_batt_capacity)
+        batt_cap_row.Add(None)
+        batt_cap_row.EndHorizontal()
+        batt_layout.Add(batt_cap_row)
+        
+        # Power
+        batt_pwr_row = Forms.DynamicLayout()
+        batt_pwr_row.BeginHorizontal()
+        batt_pwr_row.Add(Forms.Label(Text="Power (kW):"))
+        self.num_batt_power = Forms.NumericUpDown()
+        self.num_batt_power.MinValue = 1
+        self.num_batt_power.MaxValue = 500
+        self.num_batt_power.DecimalPlaces = 1
+        self.num_batt_power.Value = 5.0
+        self.num_batt_power.Width = 70
+        batt_pwr_row.Add(self.num_batt_power)
+        batt_pwr_row.Add(None)
+        batt_pwr_row.EndHorizontal()
+        batt_layout.Add(batt_pwr_row)
+        
+        # Efficiency
+        batt_eff_row = Forms.DynamicLayout()
+        batt_eff_row.BeginHorizontal()
+        batt_eff_row.Add(Forms.Label(Text="Round-trip Eff:"))
+        self.num_batt_efficiency = Forms.NumericUpDown()
+        self.num_batt_efficiency.MinValue = 0.7
+        self.num_batt_efficiency.MaxValue = 0.98
+        self.num_batt_efficiency.DecimalPlaces = 2
+        self.num_batt_efficiency.Value = 0.90
+        self.num_batt_efficiency.Width = 60
+        batt_eff_row.Add(self.num_batt_efficiency)
+        batt_eff_row.Add(None)
+        batt_eff_row.EndHorizontal()
+        batt_layout.Add(batt_eff_row)
+        
+        # Control mode
+        batt_ctrl_row = Forms.DynamicLayout()
+        batt_ctrl_row.BeginHorizontal()
+        batt_ctrl_row.Add(Forms.Label(Text="Control Mode:"))
+        self.dd_batt_control = Forms.DropDown()
+        self.dd_batt_control.Width = 160
+        self.dd_batt_control.Items.Add("Self-Consumption (PV)")
+        self.dd_batt_control.Items.Add("Peak Shaving")
+        self.dd_batt_control.Items.Add("Schedule-Based")
+        self.dd_batt_control.SelectedIndex = 0
+        batt_ctrl_row.Add(self.dd_batt_control)
+        batt_ctrl_row.Add(None)
+        batt_ctrl_row.EndHorizontal()
+        batt_layout.Add(batt_ctrl_row)
+        
+        batt_layout.AddSpace()
+        self.chk_batt_pair_pv = Forms.CheckBox(Text="Pair with PV System (DC-coupled)")
+        self.chk_batt_pair_pv.Checked = True
+        batt_layout.AddRow(self.chk_batt_pair_pv)
+        
+        batt_layout.Add(None, yscale=True)
+        
+        self.lbl_batt_status = Forms.Label(Text="Configure settings and click 'Generate IDF'")
+        batt_layout.AddRow(self.lbl_batt_status)
+        
+        tab_battery.Content = batt_layout
+        self.tab_renewables_systems.Pages.Add(tab_battery)
+        
+        # -------- WIND TAB --------
+        tab_wind = Forms.TabPage(Text="Wind Turbine")
+        wind_layout = Forms.DynamicLayout()
+        wind_layout.DefaultSpacing = Drawing.Size(5, 6)
+        wind_layout.Padding = Drawing.Padding(8)
+        
+        wind_layout.AddRow(Forms.Label(Text="Wind Turbine Generator"))
+        wind_layout.AddSpace()
+        
+        # Enable checkbox
+        self.chk_wind = Forms.CheckBox(Text="Enable Wind Turbine")
+        wind_layout.AddRow(self.chk_wind)
+        wind_layout.AddSpace()
+        
+        # Preset
+        wind_preset_row = Forms.DynamicLayout()
+        wind_preset_row.BeginHorizontal()
+        wind_preset_row.Add(Forms.Label(Text="Preset:"))
+        self.dd_wind_preset = Forms.DropDown()
+        self.dd_wind_preset.Width = 160
+        for preset in WIND_PRESETS.keys():
+            self.dd_wind_preset.Items.Add(preset)
+        self.dd_wind_preset.SelectedIndex = 1
+        wind_preset_row.Add(self.dd_wind_preset)
+        wind_preset_row.Add(None)
+        wind_preset_row.EndHorizontal()
+        wind_layout.Add(wind_preset_row)
+        
+        # Rated power
+        wind_pwr_row = Forms.DynamicLayout()
+        wind_pwr_row.BeginHorizontal()
+        wind_pwr_row.Add(Forms.Label(Text="Rated Power (kW):"))
+        self.num_wind_power = Forms.NumericUpDown()
+        self.num_wind_power.MinValue = 0.5
+        self.num_wind_power.MaxValue = 100
+        self.num_wind_power.DecimalPlaces = 1
+        self.num_wind_power.Value = 5.0
+        self.num_wind_power.Width = 60
+        wind_pwr_row.Add(self.num_wind_power)
+        wind_pwr_row.Add(None)
+        wind_pwr_row.EndHorizontal()
+        wind_layout.Add(wind_pwr_row)
+        
+        # Hub height
+        wind_hub_row = Forms.DynamicLayout()
+        wind_hub_row.BeginHorizontal()
+        wind_hub_row.Add(Forms.Label(Text="Hub Height (m):"))
+        self.num_wind_hub = Forms.NumericUpDown()
+        self.num_wind_hub.MinValue = 5
+        self.num_wind_hub.MaxValue = 100
+        self.num_wind_hub.Value = 18
+        self.num_wind_hub.Width = 60
+        wind_hub_row.Add(self.num_wind_hub)
+        wind_hub_row.Add(None)
+        wind_hub_row.EndHorizontal()
+        wind_layout.Add(wind_hub_row)
+        
+        # Rotor diameter
+        wind_rotor_row = Forms.DynamicLayout()
+        wind_rotor_row.BeginHorizontal()
+        wind_rotor_row.Add(Forms.Label(Text="Rotor Diameter (m):"))
+        self.num_wind_rotor = Forms.NumericUpDown()
+        self.num_wind_rotor.MinValue = 1
+        self.num_wind_rotor.MaxValue = 50
+        self.num_wind_rotor.DecimalPlaces = 1
+        self.num_wind_rotor.Value = 5.0
+        self.num_wind_rotor.Width = 60
+        wind_rotor_row.Add(self.num_wind_rotor)
+        wind_rotor_row.Add(None)
+        wind_rotor_row.EndHorizontal()
+        wind_layout.Add(wind_rotor_row)
+        
+        wind_layout.Add(None, yscale=True)
+        
+        self.lbl_wind_status = Forms.Label(Text="Note: Wind requires site with good wind resource")
+        wind_layout.AddRow(self.lbl_wind_status)
+        
+        tab_wind.Content = wind_layout
+        self.tab_renewables_systems.Pages.Add(tab_wind)
+        
+        config_layout.Add(self.tab_renewables_systems, xscale=True, yscale=True)
+        grp_config.Content = config_layout
+        
+        # ========== RIGHT COLUMN (1): IDF Preview ==========
+        grp_preview = create_shaded_groupbox("IDF Preview")
+        preview_layout = Forms.DynamicLayout()
+        preview_layout.DefaultSpacing = Drawing.Size(4, 4)
+        preview_layout.Padding = Drawing.Padding(4)
+        preview_layout.BackgroundColor = RESULT_BG_COLOR
+        
+        self.txt_idf_preview = Forms.TextArea()
+        self.txt_idf_preview.ReadOnly = True
+        self._idf_customizing = False  # Track edit mode
+        try:
+            self.txt_idf_preview.Font = Drawing.Font("Consolas", 8)
+        except:
+            pass
+        self.txt_idf_preview.Text = "! EnergyPlus IDF objects\n! will appear here after\n! clicking 'Generate IDF'\n!\n! Enable Battery or Wind,\n! configure settings,\n! then generate."
+        preview_layout.Add(self.txt_idf_preview, xscale=True, yscale=True)
+        
+        # Buttons under preview
+        self.btn_generate_idf = Forms.Button(Text="Generate IDF")
+        preview_layout.AddRow(self.btn_generate_idf)
+        
+        self.btn_customize_idf = Forms.Button(Text="Customize from Here")
+        preview_layout.AddRow(self.btn_customize_idf)
+        
+        self.btn_send_idf_to_gh = Forms.Button(Text="Send to GH")
+        preview_layout.AddRow(self.btn_send_idf_to_gh)
+        
+        self.btn_copy_idf = Forms.Button(Text="Copy to Clipboard")
+        preview_layout.AddRow(self.btn_copy_idf)
+        
+        grp_preview.Content = preview_layout
+        
+        # Store column references for dynamic sizing (3:1 ratio)
+        self._adv_col_left = grp_config
+        self._adv_col_right = grp_preview
+        
+        columns.Add(grp_config, xscale=True, yscale=True)
+        columns.Add(grp_preview, xscale=False, yscale=True)
+        columns.EndHorizontal()
+        
+        layout.Add(columns, xscale=True, yscale=True)
+        
+        # Bottom info bar
+        info_layout = Forms.DynamicLayout()
+        info_layout.BeginHorizontal()
+        info_layout.Add(Forms.Label(Text="PV and SHW (HB native) are in Module 5. Target Panel: '{}'".format(NAME_IDF_INJECTION)))
+        info_layout.Add(None)
+        info_layout.EndHorizontal()
+        layout.Add(info_layout)
+        
+        self.tab_renewables.Content = layout
+    
+    def _create_quick_eval_panel(self):
+        """Quick Evaluation Panel (v62)
+        Contains Parameters and Performance displays.
+        Shown via toggle button, separate from definition modules.
+        """
+        layout = Forms.DynamicLayout()
+        layout.DefaultSpacing = Drawing.Size(8, 8)
+        layout.Padding = Drawing.Padding(10)
+        
+        # Header label
+        header = Forms.Label(Text="Quick Evaluation - View simulation parameters and performance results")
+        header.TextColor = Drawing.Color.FromArgb(80, 80, 80)
+        layout.AddRow(header)
+        
+        # Main content: Parameters (left) + Performance (right)
+        columns = Forms.DynamicLayout()
+        columns.DefaultSpacing = Drawing.Size(8, 0)
+        columns.BeginHorizontal()
+        
+        # ========== LEFT: Parameters ==========
+        grp_params = create_shaded_groupbox("Parameters")
+        params_layout = Forms.DynamicLayout()
+        params_layout.Padding = Drawing.Padding(4)
+        params_layout.BackgroundColor = RESULT_BG_COLOR
+        
+        self.tab_eval_outputs = Forms.TabControl()
+        self.txt_eval_out_tabs = []
+        for name in NAME_SPACE_OUTPUTS:
+            ta = Forms.TextArea()
+            ta.ReadOnly = True
+            ta.Text = get_output_panels_text(name)
+            try:
+                ta.Font = Drawing.Font("Consolas", 9)
+            except:
+                pass
+            self.txt_eval_out_tabs.append((name, ta))
+            p = Forms.TabPage(Text=name.replace("Parameters", "Params").replace("Variables", "Vars"))
+            p.Content = ta
+            self.tab_eval_outputs.Pages.Add(p)
+        
+        params_layout.Add(self.tab_eval_outputs, xscale=True, yscale=True)
+        grp_params.Content = params_layout
+        
+        # ========== RIGHT: Performance ==========
+        grp_perf = create_shaded_groupbox("Performance")
+        perf_layout = Forms.DynamicLayout()
+        perf_layout.Padding = Drawing.Padding(4)
+        perf_layout.BackgroundColor = RESULT_BG_COLOR
+        
+        self.txt_eval_performance = Forms.TextArea()
+        self.txt_eval_performance.ReadOnly = True
+        self.txt_eval_performance.Text = get_output_panels_text(NAME_PERFORMANCE)
+        try:
+            self.txt_eval_performance.Font = Drawing.Font("Consolas", 9)
+        except:
+            pass
+        perf_layout.Add(self.txt_eval_performance, xscale=True, yscale=True)
+        grp_perf.Content = perf_layout
+        
+        columns.Add(grp_params, xscale=True, yscale=True)
+        columns.Add(grp_perf, xscale=True, yscale=True)
+        columns.EndHorizontal()
+        
+        layout.Add(columns, xscale=True, yscale=True)
+        
+        # Bottom: Re-sync button (centered)
+        btn_bar = Forms.DynamicLayout()
+        btn_bar.BeginHorizontal()
+        btn_bar.Add(None)
+        self.btn_resync_eval = Forms.Button(Text="Re-sync Outputs")
+        btn_bar.Add(self.btn_resync_eval)
+        btn_bar.Add(None)
+        btn_bar.EndHorizontal()
+        layout.Add(btn_bar)
+        
+        self.quick_eval_panel = layout
+    
+    def _setup_events(self):
+        # Space Module
+        self.btn_select.Click += self._select_breps
+        self.btn_load.Click += self._press_load_button
+        self.btn_apply_in.Click += self._apply_input_notes
+        self.btn_resync.Click += self._resync
+        self.btn_clear.Click += self._clear_breps
+        self.num_dup.ValueChanged += self._set_dup
+        self.chk_run.CheckedChanged += self._set_run
+        
+        # Space Conditioning (v62)
+        self.btn_load_blds_cond.Click += self._load_blds_for_conditioning
+        self.btn_cond_select_all.Click += self._cond_select_all
+        self.btn_cond_deselect_all.Click += self._cond_deselect_all
+        self.btn_cond_preview.Click += self._preview_cond_selection
+        self.btn_apply_cond.Click += self._apply_conditioning_status
+        
+        # Quick Evaluation (v62)
+        self.btn_resync_eval.Click += self._resync_eval
+        self.btn_toggle_qe.Click += self._toggle_quick_eval
+        
+        # Enclosure Module
+        self.btn_select_envelope.Click += self._select_envelope_breps
+        self.btn_use_space_breps.Click += self._use_space_breps
+        self.btn_deconstruct.Click += self._deconstruct_breps
+        self.btn_preview.Click += self._preview_selection
+        self.btn_gen_aperture.Click += self._generate_apertures
+        self.btn_bake_aperture.Click += self._bake_apertures
+        self.btn_send_to_gh.Click += self._send_apertures_to_gh
+        self.btn_clear_applied_ap.Click += self._clear_applied_apertures
+        self.btn_clear_baked_ap.Click += self._clear_baked_apertures
+        self.dropdown_ap_mode.SelectedIndexChanged += self._toggle_aperture_mode
+        self.dropdown_door_mode.SelectedIndexChanged += self._toggle_door_mode
+        self.btn_gen_door.Click += self._generate_doors
+        self.btn_bake_door.Click += self._bake_doors
+        self.btn_send_door_to_gh.Click += self._send_doors_to_gh
+        self.btn_clear_applied_door.Click += self._clear_applied_doors
+        self.btn_clear_baked_door.Click += self._clear_baked_doors
+        
+        # Service Module
+        self.btn_apply_preset.Click += self._apply_load_preset
+        self.btn_apply_shw_preset.Click += self._apply_shw_preset
+        self.btn_preview_program.Click += self._preview_program
+        self.btn_export_json.Click += self._export_program_json
+        self.btn_load_rooms.Click += self._load_hb_rooms
+        self.btn_preview_rooms.Click += self._preview_rooms
+        self.btn_assign_program.Click += self._assign_program_to_rooms
+        self.btn_clear_pending.Click += self._clear_pending_assignments
+        self.btn_output_programs.Click += self._send_modified_rooms_to_gh
+        self.btn_reload_gds.Click += self._reload_gds_database
+        self.grid_rooms.SelectionChanged += self._on_room_selection_changed
+        
+        # Custom schedule editor
+        self.btn_fill_office.Click += self._fill_custom_office
+        self.btn_fill_residential.Click += self._fill_custom_residential
+        self.btn_fill_constant.Click += self._fill_custom_constant
+        self.btn_save_custom.Click += self._save_custom_schedule
+        self.btn_load_custom.Click += self._load_custom_schedules
+        
+        # HVAC Module (simplified)
+        self.dd_hvac_preset.SelectedIndexChanged += self._on_hvac_preset_changed
+        self.btn_hvac_set.Click += self._hvac_set_default
+        
+        # Site Module
+        self.btn_site_apply.Click += self._apply_site_settings
+        self.btn_site_overwrite.Click += self._press_site_overwrite
+        self.btn_weather_apply.Click += self._apply_weather_path
+        self.btn_site_resync.Click += self._resync_site
+        self.num_site_index.ValueChanged += self._set_site_index
+        self.chk_inc_context.CheckedChanged += self._set_inc_context
+        
+        # Renewable Energy Module (PV + SolHW in Site module - Module 5)
+        self.dd_pv_preset.SelectedIndexChanged += self._on_pv_preset_changed
+        self.dd_pv_mounting.SelectedIndexChanged += self._on_pv_mounting_changed
+        self.btn_load_pv_shades.Click += self._load_pv_shades_from_model
+        self.btn_pick_pv_shades.Click += self._pick_pv_shades_in_rhino
+        self.btn_apply_pv.Click += self._apply_pv_properties
+        self.btn_clear_pv.Click += self._clear_pv_properties
+        self.dd_solhw_preset.SelectedIndexChanged += self._on_solhw_preset_changed
+        self.btn_apply_solhw.Click += self._apply_solhw_config
+        
+        # Advanced Module (Battery + Wind IDF - Module 6)
+        self.dd_batt_preset.SelectedIndexChanged += self._on_batt_preset_changed
+        self.dd_wind_preset.SelectedIndexChanged += self._on_wind_preset_changed
+        self.btn_generate_idf.Click += self._generate_all_idf
+        self.btn_customize_idf.Click += self._toggle_idf_customize
+        self.btn_send_idf_to_gh.Click += self._send_idf_to_gh
+        self.btn_copy_idf.Click += self._copy_idf_to_clipboard
+        
+        # Navigation
+        self.btn_prev.Click += self._go_prev
+        self.btn_next.Click += self._go_next
+        self.tab_control.SelectedIndexChanged += self._on_tab_changed
+        
+        # Window resize handling for dynamic column widths
+        self.SizeChanged += self._on_size_changed
+        self._update_column_widths()  # Initial sizing
+        
+        if DOC:
+            def _on_sol_end(sender, e):
+                try:
+                    self._resync()
+                except:
+                    pass
+            DOC.SolutionEnd += _on_sol_end
+            self._on_solution_end = _on_sol_end
+    
+    # Navigation
+    def _go_next(self, s, e):
+        if self.tab_control.SelectedIndex < len(self.tab_control.Pages) - 1:
+            self.tab_control.SelectedIndex += 1
+            self._update_nav_buttons()
+    
+    def _go_prev(self, s, e):
+        if self.tab_control.SelectedIndex > 0:
+            self.tab_control.SelectedIndex -= 1
+            self._update_nav_buttons()
+    
+    def _on_size_changed(self, s, e):
+        """Handle window resize to update column widths"""
+        self._update_column_widths()
+    
+    def _update_column_widths(self):
+        """Update column widths and splitter positions based on current window size"""
+        try:
+            # Get available dimensions (subtract padding and spacing)
+            available_width = self.ClientSize.Width - 60
+            available_height = self.ClientSize.Height - 120  # Account for tabs, nav bar, padding
+            
+            # ============ COLUMN WIDTH RATIOS ============
+            
+            # Calculate widths for 4:3:3 ratio (Envelope, Site modules)
+            unit_433 = available_width / 10.0
+            left_433 = int(unit_433 * 4)
+            mid_433 = int(unit_433 * 3)
+            right_433 = int(unit_433 * 3)
+            
+            # Calculate widths for 3:4:3 ratio (Service/Schedule module)
+            unit_343 = available_width / 10.0
+            left_343 = int(unit_343 * 3)
+            mid_343 = int(unit_343 * 4)
+            right_343 = int(unit_343 * 3)
+            
+            # Calculate widths for 4:6 ratio (Space module)
+            unit_46 = available_width / 10.0
+            left_46 = int(unit_46 * 4)
+            
+            # Minimum widths to prevent UI collapse
+            left_433 = max(left_433, 280)
+            mid_433 = max(mid_433, 200)
+            right_433 = max(right_433, 200)
+            left_343 = max(left_343, 250)
+            mid_343 = max(mid_343, 280)
+            right_343 = max(right_343, 250)
+            left_46 = max(left_46, 280)
+            
+            # Update Space module columns (4:6 ratio)
+            if hasattr(self, '_space_col_left') and self._space_col_left:
+                self._space_col_left.Width = left_46
+            
+            # Update Envelope module columns (4:3:3 ratio)
+            if hasattr(self, '_env_col_left') and self._env_col_left:
+                self._env_col_left.Width = left_433
+            if hasattr(self, '_env_col_mid') and self._env_col_mid:
+                self._env_col_mid.Width = mid_433
+            if hasattr(self, '_env_col_right') and self._env_col_right:
+                self._env_col_right.Width = right_433
+            
+            # Update Schedule module columns (3:4:3 ratio)
+            if hasattr(self, '_sched_col_left') and self._sched_col_left:
+                self._sched_col_left.Width = left_343
+            if hasattr(self, '_sched_col_mid') and self._sched_col_mid:
+                self._sched_col_mid.Width = mid_343
+            
+            # Update Site & Weather module columns (4:3:3 ratio)
+            if hasattr(self, '_site_col_left') and self._site_col_left:
+                self._site_col_left.Width = left_433
+            if hasattr(self, '_site_col_mid') and self._site_col_mid:
+                self._site_col_mid.Width = mid_433
+            
+            # Update Advanced (IDF) module columns (3:1 ratio)
+            unit_31 = available_width / 4.0
+            right_31 = max(int(unit_31 * 1), 180)
+            if hasattr(self, '_adv_col_right') and self._adv_col_right:
+                self._adv_col_right.Width = right_31
+            
+            # ============ VERTICAL SPLITTER RATIOS ============
+            
+            # Space Module - Column 1: Geometry Def / Input Panels = 1:1
+            if hasattr(self, '_space_col1_split') and self._space_col1_split:
+                pos_1_1 = int(available_height * 0.5)  # 50% for 1:1 ratio
+                self._space_col1_split.Position = max(pos_1_1, 150)
+            
+            # Note: Space Module Column 2 no longer has a splitter (v62 - Space Conditioning)
+            
+            # Site Module - Column 1: Site Def / Weather Def = 1:1
+            if hasattr(self, '_site_col1_split') and self._site_col1_split:
+                pos_1_1 = int(available_height * 0.5)  # 50% for 1:1 ratio
+                self._site_col1_split.Position = max(pos_1_1, 150)
+            
+        except:
+            pass  # Silently handle any errors during resize
+    
+    def _on_tab_changed(self, s, e):
+        self._update_nav_buttons()
+        idx = self.tab_control.SelectedIndex
+        if idx == 1:
+            self._refresh_envelope_module()
+        elif idx == 2:
+            self._update_program_summary()
+        elif idx == 3:
+            self._update_hvac_details()
+        elif idx == 4:
+            self._resync_site()
+    
+    def _update_nav_buttons(self):
+        # Only update if showing definition tabs (not Quick Eval)
+        if self.showing_quick_eval:
+            return
+            
+        idx = self.tab_control.SelectedIndex
+        max_idx = len(self.tab_control.Pages) - 1
+        self.btn_prev.Enabled = idx > 0
+        self.btn_next.Enabled = idx < max_idx
+        
+        if idx == 0:
+            self.btn_next.Text = "Next: Enclosure >"
+        elif idx == 1:
+            self.btn_next.Text = "Next: Service >"
+        elif idx == 2:
+            self.btn_next.Text = "Next: HVAC >"
+        elif idx == 3:
+            self.btn_next.Text = "Next: Site >"
+        elif idx == 4:
+            self.btn_next.Text = "Next: Advanced >"
+        else:
+            self.btn_next.Text = "Finish"
+    
+    def _refresh_envelope_module(self):
+        count = len(self.envelope_breps)
+        if count > 0:
+            self.lbl_envelope_status.Text = "{} brep(s) loaded".format(count)
+            self.btn_deconstruct.Enabled = True
+        else:
+            blds_breps = get_breps_from_param(NAME_BLDS)
+            if blds_breps:
+                self.lbl_envelope_status.Text = "'{}' has {} brep(s). Click 'Use Space Module Breps'".format(NAME_BLDS, len(blds_breps))
+            else:
+                self.lbl_envelope_status.Text = "No breps - select from Rhino or use Space Module"
+            self.btn_deconstruct.Enabled = False
+    
+    # Space Module handlers
+    def _select_breps(self, s, e):
+        self.Visible = False
+        try:
+            old_ctx = sc.doc
+            if Rhino.RhinoDoc.ActiveDoc:
+                sc.doc = Rhino.RhinoDoc.ActiveDoc
+            
+            go = ri.Custom.GetObject()
+            go.SetCommandPrompt("Select Breps")
+            go.GeometryFilter = rdo.ObjectType.Brep | rdo.ObjectType.Surface
+            go.SubObjectSelect = False
+            go.EnablePreSelect(False, True)
+            
+            res = go.GetMultiple(0, 0)
+            if res == ri.GetResult.Object:
+                self.selected_breps = []
+                self.collected_breps = []
+                
+                for obj_ref in go.Objects():
+                    if not obj_ref:
+                        continue
+                    rhino_obj = obj_ref.Object()
+                    if not rhino_obj:
+                        continue
+                    
+                    self.selected_breps.append(rhino_obj.Id)
+                    geom = obj_ref.Geometry()
+                    brep = None
+                    if geom:
+                        if geom.ObjectType == rdo.ObjectType.Brep:
+                            brep = geom.DuplicateBrep()
+                        elif geom.ObjectType == rdo.ObjectType.Surface:
+                            brep = geom.ToBrep()
+                    
+                    if brep:
+                        self.collected_breps.append(brep)
+                
+                if self.collected_breps:
+                    self.txt_brep_info.Text = "{} Brep(s) selected".format(len(self.collected_breps))
+                    
+                    def update():
+                        set_brep_components(self.collected_breps, NAME_BREP)
+                    schedule(update)
+                else:
+                    self.txt_brep_info.Text = "No Breps selected"
+            else:
+                self.txt_brep_info.Text = "Selection cancelled"
+        except Exception as ex:
+            self.txt_brep_info.Text = "Error: {}".format(str(ex))
+        finally:
+            try:
+                sc.doc = old_ctx
+            except:
+                pass
+            self.Visible = True
+            self.BringToFront()
+    
+    def _set_dup(self, s, e):
+        set_slider_value(NAME_SLIDER_DUP, self.num_dup.Value)
+    
+    def _set_run(self, s, e):
+        targets = find_objs("GH_BooleanToggle", NAME_TOGGLE)
+        if not targets:
+            return
+        state = self.chk_run.Checked
+        if state is None:
+            return
+        def do():
+            for tog in targets:
+                try:
+                    tog.Value = bool(state)
+                    tog.ExpireSolution(True)
+                except:
+                    pass
+        schedule(do)
+    
+    def _press_load_button(self, s, e):
+        press_button(NAME_BUTTON)
+    
+    def _apply_input_notes(self, s, e):
+        for name, ta in self.txt_in_list:
+            set_panel_text(name, ta.Text)
+    
+    def _resync(self, s=None, e=None):
+        try:
+            dup_info = get_slider_info(NAME_SLIDER_DUP, DUP_DEFAULT)
+            self.num_dup.MinValue = dup_info[0]
+            self.num_dup.MaxValue = dup_info[1]
+            self.num_dup.Value = dup_info[2]
+            
+            self.chk_run.Checked = get_toggles_aggregate(NAME_TOGGLE)
+            
+            for name, ta in self.txt_in_list:
+                ta.Text = get_first_input_panel_text(name)
+            
+            # Update Quick Evaluation panel outputs (v62)
+            for name, ta in self.txt_eval_out_tabs:
+                ta.Text = get_output_panels_text(name)
+            self.txt_eval_performance.Text = get_output_panels_text(NAME_PERFORMANCE)
+        except Exception as ex:
+            print("Resync error: {}".format(ex))
+    
+    def _clear_breps(self, s, e):
+        self.selected_breps = []
+        self.collected_breps = []
+        self.txt_brep_info.Text = "No Breps selected"
+    
+    # Space Conditioning handlers (v62)
+    def _load_blds_for_conditioning(self, s, e):
+        """Load breps from Blds component and populate conditioning grid"""
+        blds_breps = get_breps_from_param(NAME_BLDS)
+        if not blds_breps:
+            self.lbl_cond_status.Text = "No breps found in 'Blds' component"
+            return
+        
+        # Store actual breps for preview
+        self.cond_breps = blds_breps
+        
+        # Clear existing data
+        self.cond_breps_data = []
+        
+        # Build data for grid
+        for i, brep in enumerate(blds_breps):
+            try:
+                vol = brep.GetVolume()
+                vol_str = "{:.1f}".format(vol) if vol > 0 else "N/A"
+            except:
+                vol_str = "N/A"
+            
+            # Default all to conditioned=True
+            self.cond_breps_data.append([
+                str(i + 1),           # Index
+                "Space_{}".format(i + 1),  # Name
+                vol_str,              # Volume
+                True                  # Conditioned (default True)
+            ])
+        
+        # Update grid
+        self.grid_cond.DataStore = self.cond_breps_data
+        self.lbl_cond_status.Text = "{} space(s) loaded from 'Blds'".format(len(blds_breps))
+    
+    def _cond_select_all(self, s, e):
+        """Set all spaces to conditioned"""
+        for row in self.cond_breps_data:
+            row[3] = True
+        self.grid_cond.DataStore = self.cond_breps_data
+    
+    def _cond_deselect_all(self, s, e):
+        """Set all spaces to unconditioned"""
+        for row in self.cond_breps_data:
+            row[3] = False
+        self.grid_cond.DataStore = self.cond_breps_data
+    
+    def _preview_cond_selection(self, s, e):
+        """Preview selected spaces in GDS_Preview component"""
+        selected = list(self.grid_cond.SelectedRows)
+        if not selected:
+            self.lbl_cond_status.Text = "No spaces selected for preview"
+            return
+        
+        if not hasattr(self, 'cond_breps') or not self.cond_breps:
+            self.lbl_cond_status.Text = "Load geometry first before preview"
+            return
+        
+        # Find GDS_Preview component
+        targets = []
+        for obj in DOC.Objects:
+            if obj.NickName == NAME_PREVIEW_BREP and "Brep" in obj.GetType().Name:
+                targets.append(obj)
+        
+        if targets:
+            def do():
+                for comp in targets:
+                    comp.PersistentData.Clear()
+                    for idx in selected:
+                        if idx < len(self.cond_breps):
+                            comp.PersistentData.Append(gkt.GH_Brep(self.cond_breps[idx]))
+                    comp.ExpireSolution(True)
+            schedule(do)
+            self.lbl_cond_status.Text = "{} space(s) sent to '{}'".format(len(selected), NAME_PREVIEW_BREP)
+        else:
+            self.lbl_cond_status.Text = "GDS_Preview component not found on canvas"
+    
+    def _apply_conditioning_status(self, s, e):
+        """Send conditioning status list to GDS_Cond_Status data component"""
+        if not self.cond_breps_data:
+            self.lbl_cond_status.Text = "No spaces loaded - click 'Load Blds Geometry' first"
+            return
+        
+        # Build boolean list matching Blds order
+        bool_list = []
+        cond_count = 0
+        uncond_count = 0
+        for row in self.cond_breps_data:
+            is_cond = row[3]
+            bool_list.append(is_cond)
+            if is_cond:
+                cond_count += 1
+            else:
+                uncond_count += 1
+        
+        # Send to data component as actual booleans
+        success = set_bool_data_component(NAME_COND_STATUS, bool_list)
+        
+        if success:
+            self.lbl_cond_status.Text = "Applied: {} conditioned, {} unconditioned → '{}'".format(
+                cond_count, uncond_count, NAME_COND_STATUS)
+        else:
+            self.lbl_cond_status.Text = "Error: Data component '{}' not found on canvas".format(NAME_COND_STATUS)
+    
+    # Quick Evaluation handlers (v62)
+    def _resync_eval(self, s=None, e=None):
+        """Re-sync outputs in Quick Evaluation panel"""
+        try:
+            for name, ta in self.txt_eval_out_tabs:
+                ta.Text = get_output_panels_text(name)
+            self.txt_eval_performance.Text = get_output_panels_text(NAME_PERFORMANCE)
+        except Exception as ex:
+            print("Resync eval error: {}".format(ex))
+    
+    def _toggle_quick_eval(self, s=None, e=None):
+        """Toggle between Definition tabs and Quick Evaluation panel"""
+        if self.showing_quick_eval:
+            # Switch back to Definition tabs
+            self.main_container.Content = self.tab_control
+            self.btn_toggle_qe.Text = "Quick Evaluation ▶"
+            self.btn_prev.Enabled = self.tab_control.SelectedIndex > 0
+            self.btn_next.Enabled = self.tab_control.SelectedIndex < len(self.tab_control.Pages) - 1
+            self.showing_quick_eval = False
+            self._update_nav_buttons()
+        else:
+            # Switch to Quick Evaluation
+            self._resync_eval()  # Refresh data first
+            self.main_container.Content = self.quick_eval_panel
+            self.btn_toggle_qe.Text = "◀ Back to Definition"
+            self.btn_prev.Enabled = False
+            self.btn_next.Enabled = False
+            self.showing_quick_eval = True
+    
+    # Enclosure Module handlers
+    def _select_envelope_breps(self, s, e):
+        self.Visible = False
+        try:
+            old_ctx = sc.doc
+            if Rhino.RhinoDoc.ActiveDoc:
+                sc.doc = Rhino.RhinoDoc.ActiveDoc
+            
+            go = ri.Custom.GetObject()
+            go.SetCommandPrompt("Select Breps for Envelope")
+            go.GeometryFilter = rdo.ObjectType.Brep | rdo.ObjectType.Surface
+            go.SubObjectSelect = False
+            go.EnablePreSelect(False, True)
+            
+            res = go.GetMultiple(0, 0)
+            if res == ri.GetResult.Object:
+                self.envelope_breps = []
+                
+                for obj_ref in go.Objects():
+                    if not obj_ref:
+                        continue
+                    geom = obj_ref.Geometry()
+                    brep = None
+                    if geom:
+                        if geom.ObjectType == rdo.ObjectType.Brep:
+                            brep = geom.DuplicateBrep()
+                        elif geom.ObjectType == rdo.ObjectType.Surface:
+                            brep = geom.ToBrep()
+                    
+                    if brep:
+                        self.envelope_breps.append(brep)
+                
+                count = len(self.envelope_breps)
+                if count > 0:
+                    self.lbl_envelope_status.Text = "{} brep(s) selected from Rhino".format(count)
+                    self.btn_deconstruct.Enabled = True
+                else:
+                    self.lbl_envelope_status.Text = "No breps selected"
+            else:
+                self.lbl_envelope_status.Text = "Selection cancelled"
+        except Exception as ex:
+            self.lbl_envelope_status.Text = "Error: {}".format(str(ex)[:40])
+        finally:
+            try:
+                sc.doc = old_ctx
+            except:
+                pass
+            self.Visible = True
+            self.BringToFront()
+    
+    def _use_space_breps(self, s, e):
+        self.envelope_breps = get_breps_from_param(NAME_BLDS)
+        count = len(self.envelope_breps)
+        if count > 0:
+            self.lbl_envelope_status.Text = "{} brep(s) loaded from '{}'".format(count, NAME_BLDS)
+            self.btn_deconstruct.Enabled = True
+        else:
+            self.lbl_envelope_status.Text = "No breps found in '{}'".format(NAME_BLDS)
+            self.btn_deconstruct.Enabled = False
+    
+    def _deconstruct_breps(self, s, e):
+        if not self.envelope_breps:
+            self.lbl_envelope_status.Text = "No breps to deconstruct"
+            return
+        
+        self.surface_list = []
+        items = []
+        
+        # Collect all faces first to analyze adjacency
+        all_faces = []
+        for b_idx, brep in enumerate(self.envelope_breps):
+            for f_idx, face in enumerate(brep.Faces):
+                face_brep = face.DuplicateFace(False)
+                if face_brep:
+                    all_faces.append((b_idx, f_idx, face, face_brep))
+        
+        # Analyze each face
+        for b_idx, f_idx, face, face_brep in all_faces:
+            self.surface_list.append(face_brep)
+            amp = rg.AreaMassProperties.Compute(face_brep)
+            area = amp.Area if amp else 0
+            normal = face.NormalAt(0.5, 0.5)
+            
+            # Determine orientation
+            if normal.Z > 0.7:
+                orient = "Roof"
+                face_type = "Ext"
+            elif normal.Z < -0.7:
+                orient = "Floor"
+                face_type = "Ext"
+            else:
+                orient = "Wall"
+                # Check if wall is interior or exterior by testing adjacency
+                face_type = self._classify_wall_face(face_brep, all_faces, b_idx, f_idx)
+            
+            items.append(["[B{}] F{}: {:.1f}m2 ({})".format(b_idx, f_idx, area, orient), face_type])
+        
+        self.grid_faces.DataStore = items
+        self.lbl_envelope_status.Text = "{} faces from {} breps".format(len(self.surface_list), len(self.envelope_breps))
+    
+    def _classify_wall_face(self, face_brep, all_faces, current_b_idx, current_f_idx):
+        """Classify wall as Interior or Exterior based on adjacency to other breps"""
+        try:
+            amp = rg.AreaMassProperties.Compute(face_brep)
+            if not amp:
+                return "Ext"
+            
+            centroid = amp.Centroid
+            face_normal = face_brep.Faces[0].NormalAt(0.5, 0.5)
+            
+            # Check against faces from OTHER breps
+            for b_idx, f_idx, face, other_brep in all_faces:
+                if b_idx == current_b_idx:
+                    continue  # Skip faces from same brep
+                
+                other_amp = rg.AreaMassProperties.Compute(other_brep)
+                if not other_amp:
+                    continue
+                
+                other_centroid = other_amp.Centroid
+                other_normal = other_brep.Faces[0].NormalAt(0.5, 0.5)
+                
+                # Check if faces are close and opposing (normals pointing at each other)
+                dist = centroid.DistanceTo(other_centroid)
+                if dist < 0.5:  # Within 0.5m tolerance
+                    dot = face_normal * other_normal
+                    if dot < -0.9:  # Normals opposing
+                        return "Int"
+            
+            return "Ext"
+        except:
+            return "Ext"
+    
+    def _preview_selection(self, s, e):
+        selected = list(self.grid_faces.SelectedRows)
+        if not selected:
+            self.lbl_selection.Text = "No faces selected"
+            return
+        
+        self.lbl_selection.Text = "{} face(s) selected".format(len(selected))
+        
+        targets = []
+        for obj in DOC.Objects:
+            if obj.NickName == NAME_PREVIEW_BREP and "Brep" in obj.GetType().Name:
+                targets.append(obj)
+        
+        if targets:
+            def do():
+                for comp in targets:
+                    comp.PersistentData.Clear()
+                    for idx in selected:
+                        if idx < len(self.surface_list):
+                            comp.PersistentData.Append(gkt.GH_Brep(self.surface_list[idx]))
+                    comp.ExpireSolution(True)
+            schedule(do)
+    
+    def _toggle_aperture_mode(self, s, e):
+        use_ratio = self.dropdown_ap_mode.SelectedIndex == 0
+        self.num_ratio.Enabled = use_ratio
+        self.num_width.Enabled = not use_ratio
+        self.num_height.Enabled = not use_ratio
+    
+    def _generate_apertures(self, s, e):
+        selected = list(self.grid_faces.SelectedRows)
+        if not selected:
+            self.lbl_aperture_status.Text = "Select faces first"
+            return
+        
+        self.aperture_surfaces = []
+        info_lines = []
+        
+        use_ratio = self.dropdown_ap_mode.SelectedIndex == 0
+        ratio_val = float(self.num_ratio.Value)
+        width_val = float(self.num_width.Value)
+        height_val = float(self.num_height.Value)
+        
+        for idx in selected:
+            if idx >= len(self.surface_list):
+                continue
+            face = self.surface_list[idx]
+            
+            if use_ratio:
+                ap, ap_w, ap_h = create_coplanar_aperture_by_ratio(face, ratio_val)
+                mode_info = "Ratio: {:.0%}".format(ratio_val)
+            else:
+                ap, ap_w, ap_h = create_coplanar_aperture_by_dims(face, width_val, height_val)
+                mode_info = "Dims: {:.2f}x{:.2f}".format(width_val, height_val)
+            
+            if ap:
+                self.aperture_surfaces.append(ap)
+                amp = rg.AreaMassProperties.Compute(ap)
+                area = amp.Area if amp else 0
+                info_lines.append("Ap{}: {:.2f}m2 (W:{:.2f} H:{:.2f}) [{}]".format(
+                    len(self.aperture_surfaces), area, ap_w, ap_h, mode_info))
+            else:
+                info_lines.append("Face {}: Failed".format(idx))
+        
+        self.txt_aperture_info.Text = "\n".join(info_lines) if info_lines else "No apertures generated"
+        self.lbl_aperture_status.Text = "{} aperture(s) created".format(len(self.aperture_surfaces))
+    
+    def _bake_apertures(self, s, e):
+        if not self.aperture_surfaces:
+            self.lbl_aperture_status.Text = "Generate apertures first"
+            return
+        
+        layer_name = get_first_input_panel_text("Layer to Bake&Refer")
+        if not layer_name:
+            layer_name = "Apertures"
+        
+        try:
+            old_ctx = sc.doc
+            sc.doc = Rhino.RhinoDoc.ActiveDoc
+            
+            layer_idx = sc.doc.Layers.Find(layer_name, True)
+            if layer_idx < 0:
+                layer_idx = sc.doc.Layers.Add(layer_name, System.Drawing.Color.Blue)
+            
+            attrs = rdo.ObjectAttributes()
+            attrs.LayerIndex = layer_idx
+            
+            count = 0
+            for ap in self.aperture_surfaces:
+                if sc.doc.Objects.AddBrep(ap, attrs) != System.Guid.Empty:
+                    count += 1
+            
+            sc.doc.Views.Redraw()
+            self.lbl_aperture_status.Text = "Baked {} to '{}'".format(count, layer_name)
+        except Exception as ex:
+            self.lbl_aperture_status.Text = "Bake error: {}".format(str(ex)[:30])
+        finally:
+            sc.doc = old_ctx
+    
+    def _send_apertures_to_gh(self, s, e):
+        if not self.aperture_surfaces:
+            self.lbl_aperture_status.Text = "Generate apertures first"
+            return
+        
+        targets = []
+        for obj in DOC.Objects:
+            if obj.NickName == NAME_APERTURE_SRF and "Brep" in obj.GetType().Name:
+                targets.append(obj)
+        
+        if not targets:
+            self.lbl_aperture_status.Text = "Component '{}' not found".format(NAME_APERTURE_SRF)
+            return
+        
+        # Append newly generated apertures to cumulative list
+        for ap in self.aperture_surfaces:
+            self.applied_apertures.append(ap)
+        
+        def do():
+            for comp in targets:
+                comp.PersistentData.Clear()
+                # Add all cumulative apertures
+                for ap in self.applied_apertures:
+                    comp.PersistentData.Append(gkt.GH_Brep(ap))
+                comp.ExpireSolution(True)
+        schedule(do)
+        
+        # Press sync button to release the data dam
+        press_button(NAME_APERTURE_SYNC)
+        
+        self.lbl_aperture_status.Text = "Added {} (total: {})".format(
+            len(self.aperture_surfaces), len(self.applied_apertures))
+        self.lbl_applied_ap_count.Text = "Applied: {} aperture(s)".format(len(self.applied_apertures))
+    
+    # Door handlers
+    def _toggle_door_mode(self, s, e):
+        mode = self.dropdown_door_mode.SelectedIndex
+        if mode == 0:  # By Ratio
+            self.num_door_ratio.Enabled = True
+            self.num_door_width.Enabled = False
+            self.num_door_height.Enabled = False
+        else:  # By Dimensions
+            self.num_door_ratio.Enabled = False
+            self.num_door_width.Enabled = True
+            self.num_door_height.Enabled = True
+    
+    def _generate_doors(self, s, e):
+        selected_indices = list(self.grid_faces.SelectedRows)
+        if not selected_indices:
+            self.lbl_door_status.Text = "Select face(s) first"
+            return
+        
+        self.door_surfaces = []
+        mode = self.dropdown_door_mode.SelectedIndex
+        info_lines = []
+        
+        for idx in selected_indices:
+            if idx >= len(self.surface_list):
+                continue
+            face_brep = self.surface_list[idx]
+            
+            if mode == 0:  # By Ratio
+                ratio = self.num_door_ratio.Value
+                door, door_w, door_h = create_coplanar_door_by_ratio(
+                    face_brep, ratio, self.num_door_sill.Value)
+                mode_info = "R={:.0%}".format(ratio)
+            else:  # By Dimensions
+                width = self.num_door_width.Value
+                height = self.num_door_height.Value
+                door, door_w, door_h = create_coplanar_door_by_dims(
+                    face_brep, width, height, self.num_door_sill.Value)
+                mode_info = "{}x{}".format(width, height)
+            
+            if door:
+                self.door_surfaces.append(door)
+                amp = rg.AreaMassProperties.Compute(door)
+                area = amp.Area if amp else 0
+                info_lines.append("Door{}: {:.2f}m2 (W:{:.2f} H:{:.2f}) [{}]".format(
+                    len(self.door_surfaces), area, door_w, door_h, mode_info))
+            else:
+                info_lines.append("Face {}: Failed".format(idx))
+        
+        self.txt_door_info.Text = "\n".join(info_lines) if info_lines else "No doors generated"
+        self.lbl_door_status.Text = "{} door(s) created".format(len(self.door_surfaces))
+    
+    def _bake_doors(self, s, e):
+        if not self.door_surfaces:
+            self.lbl_door_status.Text = "Generate doors first"
+            return
+        
+        layer_name = get_first_input_panel_text("Layer to Bake&Refer")
+        if not layer_name:
+            layer_name = "Doors"
+        else:
+            layer_name = layer_name + "_Doors"
+        
+        try:
+            old_ctx = sc.doc
+            sc.doc = Rhino.RhinoDoc.ActiveDoc
+            
+            layer_idx = sc.doc.Layers.Find(layer_name, True)
+            if layer_idx < 0:
+                layer_idx = sc.doc.Layers.Add(layer_name, System.Drawing.Color.Brown)
+            
+            attrs = rdo.ObjectAttributes()
+            attrs.LayerIndex = layer_idx
+            
+            count = 0
+            for door in self.door_surfaces:
+                if sc.doc.Objects.AddBrep(door, attrs) != System.Guid.Empty:
+                    count += 1
+            
+            sc.doc.Views.Redraw()
+            self.lbl_door_status.Text = "Baked {} to '{}'".format(count, layer_name)
+        except Exception as ex:
+            self.lbl_door_status.Text = "Bake error: {}".format(str(ex)[:30])
+        finally:
+            sc.doc = old_ctx
+    
+    def _send_doors_to_gh(self, s, e):
+        if not self.door_surfaces:
+            self.lbl_door_status.Text = "Generate doors first"
+            return
+        
+        targets = []
+        for obj in DOC.Objects:
+            if obj.NickName == NAME_DOOR_SRF and "Brep" in obj.GetType().Name:
+                targets.append(obj)
+        
+        if not targets:
+            self.lbl_door_status.Text = "Component '{}' not found".format(NAME_DOOR_SRF)
+            return
+        
+        # Append newly generated doors to cumulative list
+        for door in self.door_surfaces:
+            self.applied_doors.append(door)
+        
+        def do():
+            for comp in targets:
+                comp.PersistentData.Clear()
+                # Add all cumulative doors
+                for door in self.applied_doors:
+                    comp.PersistentData.Append(gkt.GH_Brep(door))
+                comp.ExpireSolution(True)
+        schedule(do)
+        
+        # Press sync button to release the data dam
+        press_button(NAME_DOOR_SYNC)
+        
+        self.lbl_door_status.Text = "Added {} (total: {})".format(
+            len(self.door_surfaces), len(self.applied_doors))
+        self.lbl_applied_door_count.Text = "Applied: {} door(s)".format(len(self.applied_doors))
+    
+    def _clear_applied_apertures(self, s, e):
+        """Clear all applied apertures from cumulative list and GH component"""
+        self.applied_apertures = []
+        self.aperture_surfaces = []
+        
+        targets = []
+        for obj in DOC.Objects:
+            if obj.NickName == NAME_APERTURE_SRF and "Brep" in obj.GetType().Name:
+                targets.append(obj)
+        
+        if targets:
+            def do():
+                for comp in targets:
+                    comp.PersistentData.Clear()
+                    comp.ExpireSolution(True)
+            schedule(do)
+        
+        self.lbl_aperture_status.Text = "Cleared GH component"
+        self.lbl_applied_ap_count.Text = "Applied: 0 aperture(s)"
+        self.txt_aperture_info.Text = "GH apertures cleared"
+    
+    def _clear_baked_apertures(self, s, e):
+        """Delete baked aperture objects from Rhino layer"""
+        try:
+            layer_name = get_first_input_panel_text("Layer to Bake&Refer")
+            if not layer_name:
+                layer_name = "Apertures"
+            
+            old_ctx = sc.doc
+            sc.doc = Rhino.RhinoDoc.ActiveDoc
+            
+            layer_idx = sc.doc.Layers.Find(layer_name, True)
+            if layer_idx >= 0:
+                objs_to_delete = []
+                for obj in sc.doc.Objects:
+                    if obj.Attributes.LayerIndex == layer_idx:
+                        objs_to_delete.append(obj.Id)
+                
+                count = 0
+                for obj_id in objs_to_delete:
+                    if sc.doc.Objects.Delete(obj_id, True):
+                        count += 1
+                
+                sc.doc.Views.Redraw()
+                self.lbl_aperture_status.Text = "Deleted {} from '{}'".format(count, layer_name)
+            else:
+                self.lbl_aperture_status.Text = "Layer '{}' not found".format(layer_name)
+            
+        except Exception as ex:
+            self.lbl_aperture_status.Text = "Error: {}".format(str(ex)[:30])
+        finally:
+            sc.doc = old_ctx
+    
+    def _clear_applied_doors(self, s, e):
+        """Clear all applied doors from cumulative list and GH component"""
+        self.applied_doors = []
+        self.door_surfaces = []
+        
+        targets = []
+        for obj in DOC.Objects:
+            if obj.NickName == NAME_DOOR_SRF and "Brep" in obj.GetType().Name:
+                targets.append(obj)
+        
+        if targets:
+            def do():
+                for comp in targets:
+                    comp.PersistentData.Clear()
+                    comp.ExpireSolution(True)
+            schedule(do)
+        
+        self.lbl_door_status.Text = "Cleared GH component"
+        self.lbl_applied_door_count.Text = "Applied: 0 door(s)"
+        self.txt_door_info.Text = "GH doors cleared"
+    
+    def _clear_baked_doors(self, s, e):
+        """Delete baked door objects from Rhino layer"""
+        try:
+            layer_name = get_first_input_panel_text("Layer to Bake&Refer")
+            if not layer_name:
+                layer_name = "Doors"
+            else:
+                layer_name = layer_name + "_Doors"
+            
+            old_ctx = sc.doc
+            sc.doc = Rhino.RhinoDoc.ActiveDoc
+            
+            layer_idx = sc.doc.Layers.Find(layer_name, True)
+            if layer_idx >= 0:
+                objs_to_delete = []
+                for obj in sc.doc.Objects:
+                    if obj.Attributes.LayerIndex == layer_idx:
+                        objs_to_delete.append(obj.Id)
+                
+                count = 0
+                for obj_id in objs_to_delete:
+                    if sc.doc.Objects.Delete(obj_id, True):
+                        count += 1
+                
+                sc.doc.Views.Redraw()
+                self.lbl_door_status.Text = "Deleted {} from '{}'".format(count, layer_name)
+            else:
+                self.lbl_door_status.Text = "Layer '{}' not found".format(layer_name)
+            
+        except Exception as ex:
+            self.lbl_door_status.Text = "Error: {}".format(str(ex)[:30])
+        finally:
+            sc.doc = old_ctx
+    
+    # Service Module handlers
+    def _reload_gds_database(self, s, e):
+        """Reload GDS database from path"""
+        if self._load_gds_database():
+            sched_count = len(self.gds_parser.schedules) if self.gds_parser else 0
+            setp_count = len(self.gds_parser.setpoints) if self.gds_parser else 0
+            prog_count = len(self.gds_parser.programs) if self.gds_parser else 0
+            int_count = len(self.gds_parser.intensities) if self.gds_parser else 0
+            
+            self.lbl_gds_status.Text = "GDS: {} sched, {} setp, {} prog, {} int".format(
+                sched_count, setp_count, prog_count, int_count)
+            
+            # Repopulate dropdowns
+            self._populate_schedule_dropdowns()
+        else:
+            self.lbl_gds_status.Text = "GDS: Failed to load (check path)"
+    
+    def _load_hb_rooms(self, s, e):
+        """Load HB Rooms from GH component"""
+        self.hb_rooms = get_hb_rooms_from_param(NAME_HB_ROOMS_IN)
+        self.pending_assignments.clear()  # Clear pending when loading new rooms
+        
+        if not self.hb_rooms:
+            self.lbl_rooms_status.Text = "No rooms found in '{}'".format(NAME_HB_ROOMS_IN)
+            self.grid_rooms.DataStore = []
+            return
+        
+        items = []
+        self.hb_rooms_info = []
+        for i, room in enumerate(self.hb_rooms):
+            try:
+                name = getattr(room, 'display_name', getattr(room, 'identifier', 'Room_{}'.format(i)))
+                area = getattr(room, 'floor_area', 0)
+                
+                prog_name = "None"
+                if hasattr(room, 'properties') and hasattr(room.properties, 'energy'):
+                    prog = getattr(room.properties.energy, 'program_type', None)
+                    if prog:
+                        prog_name = getattr(prog, 'identifier', str(prog))[:15]
+                
+                items.append([name[:20], "{:.1f}".format(area), prog_name])
+                self.hb_rooms_info.append({
+                    'index': i,
+                    'name': name,
+                    'area': area,
+                    'program': prog_name
+                })
+            except Exception as ex:
+                items.append(["Room_{}".format(i), "?", "Error"])
+                self.hb_rooms_info.append({'index': i, 'name': 'Room_{}'.format(i), 'area': 0, 'program': 'Error'})
+        
+        self.grid_rooms.DataStore = items
+        self.lbl_rooms_status.Text = "{} rooms loaded from '{}'".format(len(self.hb_rooms), NAME_HB_ROOMS_IN)
+    
+    def _on_room_selection_changed(self, s, e):
+        """Handle room selection change and show room details"""
+        selected = list(self.grid_rooms.SelectedRows)
+        if not selected:
+            self.lbl_room_selection.Text = ""
+            self.txt_room_exam.Text = ""
+            return
+        
+        self.lbl_room_selection.Text = "{} room(s) selected".format(len(selected))
+        self._update_room_exam_panel(selected)
+    
+    def _preview_rooms(self, s, e):
+        """Send selected room geometry as Breps to GH component for preview"""
+        selected = list(self.grid_rooms.SelectedRows)
+        if not selected:
+            self.lbl_room_selection.Text = "No rooms selected"
+            return
+        
+        if not self.hb_rooms:
+            self.lbl_room_selection.Text = "No rooms loaded"
+            return
+        
+        # Find Brep component
+        targets = []
+        for obj in DOC.Objects:
+            if obj.NickName == NAME_PREVIEW_BREP and "Brep" in obj.GetType().Name:
+                targets.append(obj)
+        
+        if not targets:
+            self.lbl_room_selection.Text = "Brep '{}' not found".format(NAME_PREVIEW_BREP)
+            return
+        
+        # Extract geometry from selected rooms - one joined brep per room
+        room_breps = []
+        for idx in selected:
+            if idx < len(self.hb_rooms):
+                room = self.hb_rooms[idx]
+                face_breps = []
+                if hasattr(room, 'faces'):
+                    for face in room.faces:
+                        try:
+                            vertices = face.geometry.boundary
+                            if vertices and len(vertices) >= 3:
+                                pts = [rg.Point3d(v.x, v.y, v.z) for v in vertices]
+                                pts.append(pts[0])
+                                polyline = rg.Polyline(pts)
+                                curve = polyline.ToNurbsCurve()
+                                if curve:
+                                    tol = Rhino.RhinoDoc.ActiveDoc.ModelAbsoluteTolerance
+                                    breps = rg.Brep.CreatePlanarBreps(curve, tol)
+                                    if breps and len(breps) > 0:
+                                        face_breps.append(breps[0])
+                        except:
+                            pass
+                
+                # Join all faces of this room into one brep
+                if face_breps:
+                    if len(face_breps) == 1:
+                        room_breps.append(face_breps[0])
+                    else:
+                        tol = Rhino.RhinoDoc.ActiveDoc.ModelAbsoluteTolerance
+                        joined = rg.Brep.JoinBreps(face_breps, tol)
+                        if joined and len(joined) > 0:
+                            room_breps.append(joined[0])
+                        else:
+                            # Fallback: add all faces if join fails
+                            room_breps.extend(face_breps)
+        
+        if not room_breps:
+            self.lbl_room_selection.Text = "No geometry extracted"
+            return
+        
+        def do():
+            for comp in targets:
+                comp.PersistentData.Clear()
+                for brep in room_breps:
+                    comp.PersistentData.Append(gkt.GH_Brep(brep))
+                comp.ExpireSolution(True)
+        schedule(do)
+        
+        self.lbl_room_selection.Text = "{} room(s) → '{}'".format(len(selected), NAME_PREVIEW_BREP)
+    
+    def _clear_pending_assignments(self, s, e):
+        """Clear all pending program assignments"""
+        self.pending_assignments.clear()
+        self._refresh_room_grid()
+        
+        # Update examination panel
+        selected = list(self.grid_rooms.SelectedRows)
+        if selected:
+            self._update_room_exam_panel(selected)
+        
+        self.txt_program_summary.Text = "Cleared all pending assignments."
+    
+    # Custom Schedule Editor handlers
+    def _fill_custom_office(self, s, e):
+        sched_type = str(self.dd_custom_type.SelectedValue)
+        if sched_type == "Setpoint":
+            vals = "15.6,15.6,15.6,15.6,15.6,15.6,18,21,21,21,21,21,21,21,21,21,21,21,15.6,15.6,15.6,15.6,15.6,15.6"
+        elif sched_type == "Activity":
+            vals = "120,120,120,120,120,120,120,120,120,120,120,120,120,120,120,120,120,120,120,120,120,120,120,120"
+        else:
+            vals = "0,0,0,0,0,0,0.1,0.2,0.95,0.95,0.95,0.5,0.95,0.95,0.95,0.95,0.95,0.3,0.1,0,0,0,0,0"
+        self.txt_custom_values.Text = vals
+    
+    def _fill_custom_residential(self, s, e):
+        sched_type = str(self.dd_custom_type.SelectedValue)
+        if sched_type == "Setpoint":
+            vals = "18,18,18,18,18,18,20,21,21,18,18,18,18,18,18,18,21,21,21,21,21,20,18,18"
+        elif sched_type == "Activity":
+            vals = "72,72,72,72,72,72,108,108,144,144,144,144,144,144,144,144,144,144,108,108,108,108,72,72"
+        else:
+            vals = "0.9,0.9,0.9,0.9,0.9,0.9,0.7,0.4,0.4,0.2,0.2,0.2,0.2,0.2,0.2,0.3,0.5,0.7,0.8,0.9,0.9,0.9,0.9,0.9"
+        self.txt_custom_values.Text = vals
+    
+    def _fill_custom_constant(self, s, e):
+        sched_type = str(self.dd_custom_type.SelectedValue)
+        if sched_type == "Setpoint":
+            vals = ",".join(["21"] * 24)
+        elif sched_type == "Activity":
+            vals = ",".join(["120"] * 24)
+        else:
+            vals = ",".join(["1"] * 24)
+        self.txt_custom_values.Text = vals
+    
+    def _save_custom_schedule(self, s, e):
+        """Save custom schedule to GH Panel as JSON"""
+        try:
+            # Parse values
+            val_str = self.txt_custom_values.Text.strip()
+            values = [float(v.strip()) for v in val_str.split(",")]
+            
+            if len(values) != 24:
+                self.lbl_custom_status.Text = "Error: Need exactly 24 values, got {}".format(len(values))
+                return
+            
+            # Get name and type
+            name = self.txt_custom_sched_name.Text.strip().replace(" ", "_")
+            if not name:
+                name = "Custom_Schedule"
+            
+            sched_type = str(self.dd_custom_type.SelectedValue).lower()
+            
+            # Load existing schedules from panel
+            existing_json = get_first_input_panel_text(NAME_CUSTOM_SCHEDULES)
+            if existing_json.strip():
+                try:
+                    all_schedules = json.loads(existing_json)
+                except:
+                    all_schedules = {}
+            else:
+                all_schedules = {}
+            
+            # Add/update this schedule
+            all_schedules[name] = {
+                "type": sched_type,
+                "values": values
+            }
+            
+            # Save back to panel
+            new_json = json.dumps(all_schedules, indent=2)
+            set_panel_text(NAME_CUSTOM_SCHEDULES, new_json)
+            
+            # Update local cache and dropdowns
+            self.saved_custom_schedules = all_schedules
+            self.program_data.custom_schedules[name] = values
+            self._populate_schedule_dropdowns()
+            
+            self.lbl_custom_status.Text = "Saved '{}' ({} values)".format(name, len(values))
+            
+        except Exception as ex:
+            self.lbl_custom_status.Text = "Error: {}".format(str(ex)[:40])
+    
+    def _load_custom_schedules(self, s, e):
+        """Load custom schedules from GH Panel"""
+        try:
+            existing_json = get_first_input_panel_text(NAME_CUSTOM_SCHEDULES)
+            if not existing_json.strip():
+                self.lbl_custom_status.Text = "No custom schedules in panel"
+                return
+            
+            all_schedules = json.loads(existing_json)
+            self.saved_custom_schedules = all_schedules
+            
+            # Also load into program_data.custom_schedules
+            for name, data in all_schedules.items():
+                self.program_data.custom_schedules[name] = data.get("values", [0]*24)
+            
+            # Refresh dropdowns
+            self._populate_schedule_dropdowns()
+            
+            self.lbl_custom_status.Text = "Loaded {} custom schedule(s)".format(len(all_schedules))
+            
+        except Exception as ex:
+            self.lbl_custom_status.Text = "Error: {}".format(str(ex)[:40])
+    
+    def _apply_load_preset(self, s, e):
+        selected = str(self.dropdown_space_type.SelectedValue)
+        
+        defaults = None
+        if selected.startswith("[GDS] "):
+            name = selected[6:]
+            if self.gds_parser and name in self.gds_parser.intensities:
+                defaults = self.gds_parser.intensities[name]
+        elif selected in INTENSITY_DEFAULTS:
+            defaults = INTENSITY_DEFAULTS[selected]
+        
+        if not defaults:
+            return
+        
+        self.num_people_density.Value = defaults.get("people_per_area", 0.0565)
+        self.num_lighting_power.Value = defaults.get("lighting_power", 10.76)
+        self.num_equipment_power.Value = defaults.get("equipment_power", 10.76)
+        self.num_infiltration.Value = defaults.get("infiltration_rate", 0.0003)
+        self.num_vent_person.Value = defaults.get("ventilation_per_person", 0.006)
+        self.num_vent_area.Value = defaults.get("ventilation_per_area", 0.0003)
+        
+        # Also apply SHW if present in GDS preset
+        if hasattr(self, 'num_shw_flow'):
+            shw_flow = defaults.get("shw_flow_per_area", 0.0)
+            shw_temp = defaults.get("shw_target_temp", 49.0)
+            self.num_shw_flow.Value = shw_flow
+            self.num_shw_temp.Value = shw_temp
+        
+        self._update_program_summary()
+    
+    def _apply_shw_preset(self, s, e):
+        """Apply SHW preset values to input fields"""
+        try:
+            selected = str(self.dd_shw_load_preset.SelectedValue)
+            if selected in SHW_PRESETS:
+                preset = SHW_PRESETS[selected]
+                self.num_shw_flow.Value = preset["flow_per_area"]
+                self.num_shw_temp.Value = preset["target_temp"]
+                self.num_shw_sensible.Value = preset["sensible_fraction"]
+                self.num_shw_latent.Value = preset["latent_fraction"]
+                self._update_program_summary()
+        except Exception as ex:
+            print("SHW preset error: {}".format(ex))
+    
+    def _collect_program_data(self):
+        self.program_data.identifier = self.txt_program_id.Text
+        
+        self.program_data.people_per_area = float(self.num_people_density.Value)
+        self.program_data.lighting_power = float(self.num_lighting_power.Value)
+        self.program_data.equipment_power = float(self.num_equipment_power.Value)
+        self.program_data.gas_equipment_power = float(self.num_gas_power.Value)
+        self.program_data.infiltration_rate = float(self.num_infiltration.Value)
+        self.program_data.ventilation_per_person = float(self.num_vent_person.Value)
+        self.program_data.ventilation_per_area = float(self.num_vent_area.Value)
+        
+        def get_schedule_selection(dropdown):
+            val = str(dropdown.SelectedValue) if dropdown.SelectedValue else ""
+            if val == "Custom...":
+                return "Custom:Custom_Schedule"
+            return val
+        
+        self.program_data.occupancy_schedule = get_schedule_selection(self.dd_occ_wd)
+        self.program_data.occupancy_weekend = get_schedule_selection(self.dd_occ_we)
+        self.program_data.lighting_schedule = get_schedule_selection(self.dd_lighting)
+        self.program_data.equipment_schedule = get_schedule_selection(self.dd_equipment)
+        self.program_data.infiltration_schedule = get_schedule_selection(self.dd_infiltration)
+        self.program_data.heating_setpoint = get_schedule_selection(self.dd_heating)
+        self.program_data.cooling_setpoint = get_schedule_selection(self.dd_cooling)
+        self.program_data.activity_schedule = get_schedule_selection(self.dd_activity)
+        
+        # Service Hot Water
+        if hasattr(self, 'num_shw_flow'):
+            self.program_data.shw_flow_per_area = float(self.num_shw_flow.Value)
+            self.program_data.shw_target_temp = float(self.num_shw_temp.Value)
+            self.program_data.shw_sensible_fraction = float(self.num_shw_sensible.Value)
+            self.program_data.shw_latent_fraction = float(self.num_shw_latent.Value)
+            if hasattr(self, 'dd_shw_schedule') and self.dd_shw_schedule.SelectedValue:
+                self.program_data.shw_schedule = str(self.dd_shw_schedule.SelectedValue)
+    
+    def _update_program_summary(self):
+        self._collect_program_data()
+        
+        selected = list(self.grid_rooms.SelectedRows)
+        sel_info = "{} room(s) selected".format(len(selected)) if selected else "No rooms selected"
+        
+        # Count pending assignments
+        pending_count = len(self.pending_assignments)
+        pending_info = "  ({} pending)".format(pending_count) if pending_count > 0 else ""
+        
+        lines = [
+            u"Program: {}".format(self.program_data.identifier),
+            u"Target: {}{}".format(sel_info, pending_info),
+            u"",
+            u"═══ Load Intensities ═══",
+            u"People:       {:.4f} p/m²".format(self.program_data.people_per_area),
+            u"Lighting:     {:.2f} W/m²".format(self.program_data.lighting_power),
+            u"Elec Equip:   {:.2f} W/m²".format(self.program_data.equipment_power),
+            u"Gas Equip:    {:.2f} W/m²".format(self.program_data.gas_equipment_power),
+            u"Infiltration: {:.5f} m³/s/m²".format(self.program_data.infiltration_rate),
+            u"Vent/Person:  {:.4f} m³/s/p".format(self.program_data.ventilation_per_person),
+            u"Vent/Area:    {:.5f} m³/s/m²".format(self.program_data.ventilation_per_area),
+            u"",
+            u"═══ Schedules ═══",
+            u"Occ Weekday:  {}".format(self.program_data.occupancy_schedule[:25]),
+            u"Occ Weekend:  {}".format(self.program_data.occupancy_weekend[:25]),
+            u"Lighting:     {}".format(self.program_data.lighting_schedule[:25]),
+            u"Equipment:    {}".format(self.program_data.equipment_schedule[:25]),
+            u"Infiltration: {}".format(self.program_data.infiltration_schedule[:25]),
+            u"Activity:     {}".format(self.program_data.activity_schedule[:25]),
+            u"",
+            u"═══ Setpoints ═══",
+            u"Heating:      {}".format(self.program_data.heating_setpoint[:25]),
+            u"Cooling:      {}".format(self.program_data.cooling_setpoint[:25]),
+        ]
+        
+        # Service Hot Water section (always show)
+        if hasattr(self, 'num_shw_flow'):
+            lines.append(u"")
+            lines.append(u"═══ Service Hot Water ═══")
+            lines.append(u"Flow/Area:    {:.3f} L/h/m²".format(self.program_data.shw_flow_per_area))
+            lines.append(u"Target Temp:  {:.1f} °C".format(self.program_data.shw_target_temp))
+            lines.append(u"Sensible:     {:.2f}".format(self.program_data.shw_sensible_fraction))
+            lines.append(u"Latent:       {:.2f}".format(self.program_data.shw_latent_fraction))
+            lines.append(u"Schedule:     {}".format(self.program_data.shw_schedule[:25]))
+        
+        self.txt_program_summary.Text = u"\n".join(lines)
+    
+    def _preview_program(self, s, e):
+        self._collect_program_data()
+        
+        program_dict = self.program_data.to_program_dict(self.gds_parser)
+        self.txt_json_output.Text = json.dumps(program_dict, indent=2)
+        self._update_program_summary()
+    
+    def _assign_program_to_rooms(self, s, e):
+        """Queue program assignment to selected rooms (in-memory, applied on Send)"""
+        selected = list(self.grid_rooms.SelectedRows)
+        if not selected:
+            self.txt_program_summary.Text = "No rooms selected. Select rooms first."
+            return
+        
+        if not self.hb_rooms:
+            self.txt_program_summary.Text = "No rooms loaded. Load rooms first."
+            return
+        
+        self._collect_program_data()
+        program_dict = self.program_data.to_program_dict(self.gds_parser)
+        program_name = self.program_data.identifier
+        
+        # Store pending assignment for each selected room
+        for idx in selected:
+            if idx < len(self.hb_rooms):
+                self.pending_assignments[idx] = {
+                    'program_dict': program_dict,
+                    'program_name': program_name
+                }
+        
+        # Update grid to show pending assignments
+        self._refresh_room_grid()
+        
+        # Update examination panel to show pending
+        self._update_room_exam_panel(selected)
+        
+        self.txt_program_summary.Text = "Queued '{}' for {} room(s).\n\nPending assignments shown with * prefix.\nClick 'Apply' to apply and export.".format(
+            program_name, len(selected))
+    
+    def _update_room_exam_panel(self, selected_indices):
+        """Update the room examination panel for given indices"""
+        if not selected_indices:
+            self.txt_room_exam.Text = ""
+            return
+        
+        info_lines = []
+        for idx in selected_indices[:3]:
+            if idx >= len(self.hb_rooms):
+                continue
+            
+            room = self.hb_rooms[idx]
+            try:
+                name = getattr(room, 'display_name', getattr(room, 'identifier', 'Room_{}'.format(idx)))
+                area = getattr(room, 'floor_area', 0)
+                volume = getattr(room, 'volume', 0)
+                
+                info_lines.append(u"─── {} ───".format(name))
+                info_lines.append(u"Area: {:.2f} m²  Vol: {:.2f} m³".format(area, volume))
+                
+                # Check pending assignment first (higher priority)
+                if idx in self.pending_assignments:
+                    pending_prog = self.pending_assignments[idx]['program_name']
+                    info_lines.append(u"★ PENDING: {}".format(pending_prog))
+                    # Show pending program details
+                    pending_dict = self.pending_assignments[idx]['program_dict']
+                    if 'people' in pending_dict:
+                        ppa = pending_dict['people'].get('people_per_area', 0)
+                        info_lines.append(u"  People: {:.4f} p/m²".format(ppa))
+                    if 'lighting' in pending_dict:
+                        lpd = pending_dict['lighting'].get('watts_per_area', 0)
+                        info_lines.append(u"  Lighting: {:.2f} W/m²".format(lpd))
+                    if 'electric_equipment' in pending_dict:
+                        epd = pending_dict['electric_equipment'].get('watts_per_area', 0)
+                        info_lines.append(u"  Equipment: {:.2f} W/m²".format(epd))
+                else:
+                    # Show current program info
+                    if hasattr(room, 'properties') and hasattr(room.properties, 'energy'):
+                        energy = room.properties.energy
+                        prog = getattr(energy, 'program_type', None)
+                        if prog:
+                            prog_id = getattr(prog, 'identifier', str(prog))
+                            info_lines.append(u"Current: {}".format(prog_id))
+                            
+                            if hasattr(prog, 'people') and prog.people:
+                                ppa = getattr(prog.people, 'people_per_area', 0)
+                                info_lines.append(u"  People: {:.4f} p/m²".format(ppa))
+                            if hasattr(prog, 'lighting') and prog.lighting:
+                                lpd = getattr(prog.lighting, 'watts_per_area', 0)
+                                info_lines.append(u"  Lighting: {:.2f} W/m²".format(lpd))
+                            if hasattr(prog, 'electric_equipment') and prog.electric_equipment:
+                                epd = getattr(prog.electric_equipment, 'watts_per_area', 0)
+                                info_lines.append(u"  Equipment: {:.2f} W/m²".format(epd))
+                        else:
+                            info_lines.append(u"Current: None")
+                
+                info_lines.append(u"")
+            except Exception as ex:
+                info_lines.append(u"Error reading room {}: {}".format(idx, str(ex)[:30]))
+        
+        if len(selected_indices) > 3:
+            info_lines.append(u"... and {} more room(s)".format(len(selected_indices) - 3))
+        
+        self.txt_room_exam.Text = u"\n".join(info_lines)
+    
+    def _refresh_room_grid(self):
+        """Refresh the room grid to show current state and pending assignments"""
+        if not self.hb_rooms:
+            return
+        
+        items = []
+        for i, room in enumerate(self.hb_rooms):
+            try:
+                name = getattr(room, 'display_name', getattr(room, 'identifier', 'Room_{}'.format(i)))
+                area = getattr(room, 'floor_area', 0)
+                
+                # Check for pending assignment first
+                if i in self.pending_assignments:
+                    prog_name = "*" + self.pending_assignments[i]['program_name'][:14]
+                else:
+                    prog_name = "None"
+                    if hasattr(room, 'properties') and hasattr(room.properties, 'energy'):
+                        prog = getattr(room.properties.energy, 'program_type', None)
+                        if prog:
+                            prog_name = getattr(prog, 'identifier', str(prog))[:15]
+                
+                items.append([name[:20], "{:.1f}".format(area), prog_name])
+            except:
+                items.append(["Room_{}".format(i), "?", "Error"])
+        
+        self.grid_rooms.DataStore = items
+    
+    def _send_modified_rooms_to_gh(self, s, e):
+        """Output all rooms and all corresponding programs 1:1"""
+        if not self.hb_rooms:
+            self.txt_program_summary.Text = "No rooms to send. Load rooms first."
+            return
+        
+        if not self.pending_assignments:
+            self.txt_program_summary.Text = "No pending assignments. Use 'Assign to Selected Rooms' first."
+            return
+        
+        def expire_with_group(comp):
+            """Expire component and any group it belongs to"""
+            comp.ExpireSolution(True)
+            # Also expire any group containing this component
+            try:
+                for obj in DOC.Objects:
+                    if hasattr(obj, 'Objects'):  # It's a group
+                        if comp in obj.Objects():
+                            obj.ExpireSolution(True)
+            except:
+                pass
+        
+        try:
+            from Grasshopper.Kernel.Types import GH_ObjectWrapper
+            
+            # Build program list for ALL rooms 1:1
+            program_jsons = []
+            assigned_count = 0
+            
+            for i, room in enumerate(self.hb_rooms):
+                if i in self.pending_assignments:
+                    # Room has pending assignment - use new program
+                    program_dict = self.pending_assignments[i]['program_dict']
+                    program_dict = dict(program_dict)  # copy
+                    base_id = program_dict.get('identifier', 'GDS_Program')
+                    program_dict['identifier'] = "{}_R{}".format(base_id, i)
+                    program_jsons.append(json.dumps(program_dict))
+                    assigned_count += 1
+                else:
+                    # No pending assignment - use existing program from room
+                    existing_prog = None
+                    try:
+                        if hasattr(room, 'properties') and hasattr(room.properties, 'energy'):
+                            existing_prog = getattr(room.properties.energy, 'program_type', None)
+                    except:
+                        pass
+                    
+                    if existing_prog:
+                        # Serialize existing program
+                        try:
+                            prog_dict = existing_prog.to_dict()
+                            program_jsons.append(json.dumps(prog_dict))
+                        except:
+                            program_jsons.append("")
+                    else:
+                        program_jsons.append("")
+            
+            # Output ALL program JSONs 1:1 matching rooms
+            program_targets = []
+            for obj in DOC.Objects:
+                if obj.NickName == NAME_PROGRAM_OUTPUT:
+                    program_targets.append(obj)
+            
+            if program_targets:
+                def do_program_output():
+                    for comp in program_targets:
+                        comp.PersistentData.Clear()
+                        for prog_json in program_jsons:
+                            comp.PersistentData.Append(GH_ObjectWrapper(prog_json))
+                        expire_with_group(comp)
+                schedule(do_program_output)
+            else:
+                self.txt_program_summary.Text = "Error: '{}' not found on canvas.".format(NAME_PROGRAM_OUTPUT)
+                return
+            
+            # Clear pending
+            self.pending_assignments.clear()
+            self._refresh_room_grid()
+            
+            selected = list(self.grid_rooms.SelectedRows)
+            if selected:
+                self._update_room_exam_panel(selected)
+            
+            self.txt_program_summary.Text = (
+                "Output {} room(s), {} with new programs.\n\n"
+                "GH Setup:\n"
+                "[{}] -> [HB Str to Obj] -> programs\n"
+                "[HB_Rooms] + programs -> [HB Apply ProgramType]\n\n"
+                "Both lists are 1:1 matched."
+            ).format(len(self.hb_rooms), assigned_count, NAME_PROGRAM_OUTPUT)
+            
+            # Update initialization status
+            self.lbl_init_status.Text = "✓ Initialization complete"
+            self.lbl_init_status.TextColor = Drawing.Color.FromArgb(0, 128, 0)  # Green
+            
+        except Exception as ex:
+            import traceback
+            self.txt_program_summary.Text = "Error: {}\n{}".format(ex, traceback.format_exc()[:300])
+            self.lbl_init_status.Text = "✗ Apply failed"
+            self.lbl_init_status.TextColor = Drawing.Color.FromArgb(200, 0, 0)  # Red
+    
+    def _create_program_from_dict(self, program_dict):
+        """Create ProgramType using HB API directly"""
+        error_details = []
+        
+        try:
+            from honeybee_energy.programtype import ProgramType
+            from honeybee_energy.schedule.ruleset import ScheduleRuleset
+            from honeybee_energy.schedule.day import ScheduleDay
+            from honeybee_energy.load.people import People
+            from honeybee_energy.load.lighting import Lighting
+            from honeybee_energy.load.equipment import ElectricEquipment
+            from honeybee_energy.load.infiltration import Infiltration
+            from honeybee_energy.load.ventilation import Ventilation
+            from honeybee_energy.load.setpoint import Setpoint
+            from ladybug.dt import Time
+            
+            prog_id = program_dict.get('identifier', 'GDS_Program')
+            error_details.append("prog_id: {}".format(prog_id))
+            
+            # Create times list for 24-hour schedules
+            times_24 = [Time(i, 0) for i in range(24)]
+            
+            def make_schedule(sched_dict, sched_name):
+                """Create simple ScheduleRuleset from values"""
+                if not sched_dict:
+                    return None
+                
+                # Get values from first day schedule
+                day_scheds = sched_dict.get('day_schedules', [])
+                if not day_scheds:
+                    return None
+                
+                values = day_scheds[0].get('values', [0]*24)
+                sched_id = sched_dict.get('identifier', sched_name)
+                
+                # Create ScheduleDay with values AND times
+                day_sched = ScheduleDay(sched_id + '_Day', values, times_24)
+                schedule = ScheduleRuleset(sched_id, day_sched)
+                return schedule
+            
+            # Create schedules
+            people_dict = program_dict.get('people', {})
+            occ_sched = make_schedule(people_dict.get('occupancy_schedule'), prog_id + '_Occ')
+            error_details.append("occ_sched: {}".format(occ_sched))
+            
+            act_sched = make_schedule(people_dict.get('activity_schedule'), prog_id + '_Act')
+            error_details.append("act_sched: {}".format(act_sched))
+            
+            light_dict = program_dict.get('lighting', {})
+            light_sched = make_schedule(light_dict.get('schedule'), prog_id + '_Light')
+            
+            equip_dict = program_dict.get('electric_equipment', {})
+            equip_sched = make_schedule(equip_dict.get('schedule'), prog_id + '_Equip')
+            
+            infil_dict = program_dict.get('infiltration', {})
+            infil_sched = make_schedule(infil_dict.get('schedule'), prog_id + '_Infil')
+            
+            setp_dict = program_dict.get('setpoint', {})
+            heat_sched = make_schedule(setp_dict.get('heating_schedule'), prog_id + '_Heat')
+            cool_sched = make_schedule(setp_dict.get('cooling_schedule'), prog_id + '_Cool')
+            
+            # Create loads
+            people = None
+            if people_dict and occ_sched:
+                people = People(
+                    prog_id + '_People',
+                    people_dict.get('people_per_area', 0.0565),
+                    occ_sched,
+                    activity_schedule=act_sched
+                )
+                error_details.append("people created")
+            
+            lighting = None
+            if light_dict and light_sched:
+                lighting = Lighting(
+                    prog_id + '_Lighting',
+                    light_dict.get('watts_per_area', 10.76),
+                    light_sched
+                )
+                error_details.append("lighting created")
+            
+            electric_equipment = None
+            if equip_dict and equip_sched:
+                electric_equipment = ElectricEquipment(
+                    prog_id + '_ElecEquip',
+                    equip_dict.get('watts_per_area', 10.76),
+                    equip_sched
+                )
+            
+            infiltration = None
+            if infil_dict and infil_sched:
+                infiltration = Infiltration(
+                    prog_id + '_Infiltration',
+                    infil_dict.get('flow_per_exterior_area', 0.0003),
+                    infil_sched
+                )
+            
+            vent_dict = program_dict.get('ventilation', {})
+            ventilation = None
+            if vent_dict:
+                ventilation = Ventilation(
+                    prog_id + '_Ventilation',
+                    vent_dict.get('outdoor_air_per_person', 0.006),
+                    vent_dict.get('outdoor_air_per_area', 0.0003)
+                )
+            
+            setpoint = None
+            if heat_sched and cool_sched:
+                setpoint = Setpoint(
+                    prog_id + '_Setpoint',
+                    heat_sched,
+                    cool_sched
+                )
+            
+            # Create ProgramType
+            program = ProgramType(
+                prog_id,
+                people=people,
+                lighting=lighting,
+                electric_equipment=electric_equipment,
+                infiltration=infiltration,
+                ventilation=ventilation,
+                setpoint=setpoint
+            )
+            
+            error_details.append("program created successfully")
+            return program
+            
+        except Exception as ex:
+            import traceback
+            tb = traceback.format_exc()
+            error_details.append("EXCEPTION: {}".format(ex))
+            error_details.append(tb)
+            # Store for display
+            self._last_program_error = "\n".join(error_details)
+            return None
+    
+    def _export_program_json(self, s, e):
+        self._collect_program_data()
+        
+        dialog = Forms.SaveFileDialog()
+        dialog.Title = "Export Program JSON"
+        dialog.Filters.Add(Forms.FileFilter("JSON Files", ".json"))
+        dialog.FileName = "{}.json".format(self.program_data.identifier)
+        
+        if dialog.ShowDialog(self) == Forms.DialogResult.Ok:
+            program_dict = self.program_data.to_program_dict(self.gds_parser)
+            
+            try:
+                with open(dialog.FileName, 'w') as f:
+                    json.dump(program_dict, f, indent=2)
+                self.txt_program_summary.Text = "Exported to: {}".format(dialog.FileName)
+            except Exception as ex:
+                self.txt_program_summary.Text = "Export error: {}".format(ex)
+    
+    # Site Module handlers
+    def _apply_site_settings(self, s, e):
+        set_panel_text(NAME_SITE_CONTEXT, self.txt_site_context.Text)
+        set_panel_text(NAME_SITE_NAME, self.txt_site_name.Text)
+        set_slider_value(NAME_SITE_INDEX, self.num_site_index.Value)
+    
+    def _set_site_index(self, s, e):
+        set_slider_value(NAME_SITE_INDEX, self.num_site_index.Value)
+    
+    def _press_site_overwrite(self, s, e):
+        press_button(NAME_SITE_BUTTON)
+    
+    def _apply_weather_path(self, s, e):
+        set_panel_text(NAME_WEATHER_PATH, self.txt_weather_path.Text)
+    
+    def _set_inc_context(self, s, e):
+        """Set the Include Context toggle on the canvas"""
+        targets = find_objs("GH_BooleanToggle", NAME_INC_CONTEXT)
+        if not targets:
+            return
+        state = self.chk_inc_context.Checked
+        if state is None:
+            return
+        def do():
+            for tog in targets:
+                try:
+                    tog.Value = bool(state)
+                    tog.ExpireSolution(True)
+                except:
+                    pass
+        schedule(do)
+    
+    def _resync_site(self, s=None, e=None):
+        try:
+            self.txt_site_context.Text = get_first_input_panel_text(NAME_SITE_CONTEXT)
+            self.txt_site_name.Text = get_first_input_panel_text(NAME_SITE_NAME)
+            self.txt_weather_path.Text = get_first_input_panel_text(NAME_WEATHER_PATH)
+            
+            site_idx_info = get_slider_info(NAME_SITE_INDEX, 0)
+            self.num_site_index.MinValue = site_idx_info[0]
+            self.num_site_index.MaxValue = site_idx_info[1]
+            self.num_site_index.Value = site_idx_info[2]
+            
+            self.chk_inc_context.Checked = get_toggles_aggregate(NAME_INC_CONTEXT)
+        except Exception as ex:
+            print("Site resync error: {}".format(ex))
+    
+    # ==================== RENEWABLE ENERGY HANDLERS ====================
+    
+    def _on_pv_preset_changed(self, s, e):
+        """Update parameters when preset changes"""
+        try:
+            preset_name = str(self.dd_pv_preset.SelectedValue)
+            if preset_name in PV_PRESETS:
+                p = PV_PRESETS[preset_name]
+                self.num_pv_efficiency.Value = p["efficiency"]
+                self.num_pv_loss.Value = p["loss_fraction"]
+                self.num_pv_gcr.Value = p.get("tracking_gcr", 0.4)
+                
+                # Set module type dropdown
+                module_type = p.get("module_type", "Standard")
+                for i in range(self.dd_pv_module_type.Items.Count):
+                    if str(self.dd_pv_module_type.Items[i]) == module_type:
+                        self.dd_pv_module_type.SelectedIndex = i
+                        break
+                
+                # Set mounting dropdown
+                mounting = p["mounting"]
+                for i in range(self.dd_pv_mounting.Items.Count):
+                    if str(self.dd_pv_mounting.Items[i]) == mounting:
+                        self.dd_pv_mounting.SelectedIndex = i
+                        break
+                
+                # Enable/disable GCR based on mounting
+                self._update_gcr_enabled()
+        except Exception as ex:
+            print("PV preset change error: {}".format(ex))
+    
+    def _on_pv_mounting_changed(self, s, e):
+        """Enable/disable GCR input based on mounting type"""
+        self._update_gcr_enabled()
+    
+    def _update_gcr_enabled(self):
+        """Update GCR input enabled state based on mounting type"""
+        try:
+            mounting = str(self.dd_pv_mounting.SelectedValue)
+            is_tracking = mounting in ['OneAxis', 'OneAxisBacktracking']
+            self.num_pv_gcr.Enabled = is_tracking
+            if is_tracking:
+                self.lbl_gcr_note.Text = "(tracking ratio)"
+            else:
+                self.lbl_gcr_note.Text = "(OneAxis only)"
+        except:
+            pass
+    
+    def _load_pv_shades_from_model(self, s, e):
+        """Load HB Shade objects from connected model"""
+        try:
+            # Try to get shades from a GH parameter named "HB_Shades"
+            shades = get_hb_shades_from_param("HB_Shades")
+            if shades:
+                self.pv_shades = shades
+                total_area = sum(sh.geometry.area for sh in shades if hasattr(sh, 'geometry'))
+                self.lbl_pv_shade_status.Text = "{} shades ({:.1f} m²)".format(
+                    len(shades), total_area)
+            else:
+                self.lbl_pv_shade_status.Text = "No shades found"
+        except Exception as ex:
+            self.lbl_pv_shade_status.Text = "Error: {}".format(str(ex)[:20])
+    
+    def _pick_pv_shades_in_rhino(self, s, e):
+        """Pick surfaces in Rhino to use as PV shades"""
+        self.Visible = False
+        try:
+            old_ctx = sc.doc
+            if Rhino.RhinoDoc.ActiveDoc:
+                sc.doc = Rhino.RhinoDoc.ActiveDoc
+            
+            go = ri.Custom.GetObject()
+            go.SetCommandPrompt("Select surfaces for PV panels")
+            go.GeometryFilter = rdo.ObjectType.Surface | rdo.ObjectType.Brep
+            go.SubObjectSelect = False
+            go.EnablePreSelect(False, True)
+            
+            res = go.GetMultiple(0, 0)
+            if res == ri.GetResult.Object:
+                self.pv_shade_breps = []
+                total_area = 0
+                
+                for obj_ref in go.Objects():
+                    geom = obj_ref.Geometry()
+                    if geom:
+                        brep = None
+                        if geom.ObjectType == rdo.ObjectType.Brep:
+                            brep = geom.DuplicateBrep()
+                        elif geom.ObjectType == rdo.ObjectType.Surface:
+                            brep = geom.ToBrep()
+                        
+                        if brep:
+                            self.pv_shade_breps.append(brep)
+                            amp = rg.AreaMassProperties.Compute(brep)
+                            if amp:
+                                total_area += amp.Area
+                
+                count = len(self.pv_shade_breps)
+                self.lbl_pv_shade_status.Text = "{} surfaces ({:.1f} m²)".format(
+                    count, total_area)
+            else:
+                self.lbl_pv_shade_status.Text = "Cancelled"
+                
+        except Exception as ex:
+            self.lbl_pv_shade_status.Text = "Error: {}".format(str(ex)[:20])
+        finally:
+            try:
+                sc.doc = old_ctx
+            except:
+                pass
+            self.Visible = True
+            self.BringToFront()
+    
+    def _apply_pv_properties(self, s, e):
+        """Apply PV properties to selected shades"""
+        try:
+            # Collect parameters
+            efficiency = float(self.num_pv_efficiency.Value)
+            active_area = float(self.num_pv_active.Value)
+            module_type = str(self.dd_pv_module_type.SelectedValue)
+            mounting = str(self.dd_pv_mounting.SelectedValue)
+            loss_fraction = float(self.num_pv_loss.Value)
+            tracking_gcr = float(self.num_pv_gcr.Value)
+            
+            # Get shade count and area
+            shade_count = 0
+            total_area = 0
+            
+            if hasattr(self, 'pv_shades') and self.pv_shades:
+                shade_count = len(self.pv_shades)
+                total_area = sum(sh.geometry.area for sh in self.pv_shades 
+                                if hasattr(sh, 'geometry'))
+            elif hasattr(self, 'pv_shade_breps') and self.pv_shade_breps:
+                shade_count = len(self.pv_shade_breps)
+                for brep in self.pv_shade_breps:
+                    amp = rg.AreaMassProperties.Compute(brep)
+                    if amp:
+                        total_area += amp.Area
+            
+            if shade_count == 0:
+                self.txt_pv_summary.Text = "Error: No shades selected.\n\nPlease select surfaces first."
+                return
+            
+            # Calculate stats
+            active_area_total = total_area * active_area
+            # Capacity at STC: 1000 W/m² × efficiency × area
+            capacity_kw = (active_area_total * efficiency * 1000) / 1000
+            
+            # Rough annual generation estimate
+            # Assumes ~1700 kWh/m²/year solar resource, 80% performance ratio
+            annual_kwh = capacity_kw * 1700 * 0.80
+            
+            # Adjust for mounting type
+            mounting_boost = {
+                "FixedOpenRack": 1.0,
+                "FixedRoofMounted": 0.95,
+                "OneAxis": 1.20,
+                "OneAxisBacktracking": 1.18,
+                "TwoAxis": 1.35,
+            }
+            annual_kwh *= mounting_boost.get(mounting, 1.0)
+            
+            # Build summary with GCR if applicable
+            is_tracking = mounting in ['OneAxis', 'OneAxisBacktracking']
+            
+            summary_lines = [
+                "=" * 35,
+                "PV SYSTEM SUMMARY",
+                "=" * 35,
+                "",
+                "Configuration:",
+                "  Module Type: {}".format(module_type),
+                "  Efficiency: {:.1%}".format(efficiency),
+                "  Mounting: {}".format(mounting),
+            ]
+            
+            if is_tracking:
+                summary_lines.append("  Tracking GCR: {:.2f}".format(tracking_gcr))
+            
+            summary_lines.extend([
+                "  System Losses: {:.1%}".format(loss_fraction),
+                "",
+                "Surfaces:",
+                "  Count: {} shades".format(shade_count),
+                "  Total Area: {:.1f} m²".format(total_area),
+                "  Active Area: {:.1f} m² ({:.0%})".format(active_area_total, active_area),
+                "",
+                "Estimated Output:",
+                "  DC Capacity: {:.2f} kW".format(capacity_kw),
+                "  Annual Gen: {:,.0f} kWh/year".format(annual_kwh),
+                "",
+                "=" * 35,
+                "Status: Ready for simulation",
+                "",
+                "Use HB Photovoltaic Properties component",
+                "to apply these settings to HB Shades.",
+            ])
+            self.txt_pv_summary.Text = "\n".join(summary_lines)
+            
+            # Store config in sticky for other components
+            pv_config = {
+                "efficiency": efficiency,
+                "active_area_fraction": active_area,
+                "module_type": module_type,
+                "mounting_type": mounting,
+                "loss_fraction": loss_fraction,
+                "tracking_gcr": tracking_gcr,
+                "shade_count": shade_count,
+                "total_area_m2": total_area,
+                "capacity_kw": capacity_kw,
+            }
+            sc.sticky["GDS_PV_CONFIG"] = pv_config
+            
+        except Exception as ex:
+            import traceback
+            self.txt_pv_summary.Text = "Error applying PV:\n{}\n\n{}".format(ex, traceback.format_exc())
+    
+    def _clear_pv_properties(self, s, e):
+        """Clear PV configuration"""
+        self.pv_shades = []
+        self.pv_shade_breps = []
+        self.lbl_pv_shade_status.Text = "0 shades (0 m²)"
+        self.txt_pv_summary.Text = "No renewable systems configured.\n\nPV: Select shades, Apply PV\nSolar HW: Enable, Apply Config\n\nFor Battery & Wind (IDF),\nsee Module 6: Advanced."
+        
+        if "GDS_PV_CONFIG" in sc.sticky:
+            del sc.sticky["GDS_PV_CONFIG"]
+    
+    # ==================== MODULE 6: RENEWABLES HANDLERS ====================
+    
+    def _on_batt_preset_changed(self, s, e):
+        """Update battery parameters from preset"""
+        try:
+            preset_name = str(self.dd_batt_preset.SelectedValue)
+            if preset_name in BATTERY_PRESETS:
+                p = BATTERY_PRESETS[preset_name]
+                self.num_batt_capacity.Value = p["capacity_kwh"]
+                self.num_batt_power.Value = p["power_kw"]
+                self.num_batt_efficiency.Value = p["efficiency"]
+        except Exception as ex:
+            print("Battery preset error: {}".format(ex))
+    
+    def _on_wind_preset_changed(self, s, e):
+        """Update wind parameters from preset"""
+        try:
+            preset_name = str(self.dd_wind_preset.SelectedValue)
+            if preset_name in WIND_PRESETS:
+                p = WIND_PRESETS[preset_name]
+                self.num_wind_power.Value = p["rated_power_kw"]
+                self.num_wind_hub.Value = p["hub_height_m"]
+                self.num_wind_rotor.Value = p["rotor_diameter_m"]
+        except Exception as ex:
+            print("Wind preset error: {}".format(ex))
+    
+    def _on_solhw_preset_changed(self, s, e):
+        """Update Solar HW parameters from preset (Module 5)"""
+        try:
+            preset_name = str(self.dd_solhw_preset.SelectedValue)
+            if preset_name in SOLHW_PRESETS:
+                p = SOLHW_PRESETS[preset_name]
+                self.num_solhw_efficiency.Value = p["efficiency"]
+        except Exception as ex:
+            print("Solar HW preset error: {}".format(ex))
+    
+    def _apply_solhw_config(self, s, e):
+        """Apply Solar HW configuration and store for HB SHW System component"""
+        try:
+            if not self.chk_solhw_enable.Checked:
+                # Update summary
+                self._update_renewables_summary()
+                return
+            
+            equipment = str(self.dd_solhw_equipment.SelectedValue)
+            collector_type = str(self.dd_solhw_preset.SelectedValue)
+            area = float(self.num_solhw_area.Value)
+            efficiency = float(self.num_solhw_efficiency.Value)
+            
+            # Store config for HB SHW System
+            solhw_config = {
+                "enabled": True,
+                "equipment_type": equipment,
+                "collector_type": collector_type,
+                "collector_area": area,
+                "efficiency": efficiency,
+            }
+            sc.sticky["GDS_SOLHW_CONFIG"] = solhw_config
+            
+            # Update summary
+            self._update_renewables_summary()
+            
+        except Exception as ex:
+            print("Solar HW config error: {}".format(ex))
+    
+    def _update_renewables_summary(self):
+        """Update the combined PV + SHW summary in Module 5"""
+        try:
+            lines = ["=" * 35, "RENEWABLE SYSTEMS SUMMARY", "=" * 35, ""]
+            
+            # PV Status
+            if "GDS_PV_CONFIG" in sc.sticky:
+                pv = sc.sticky["GDS_PV_CONFIG"]
+                lines.extend([
+                    "PHOTOVOLTAIC:",
+                    "  Capacity: {:.2f} kW".format(pv.get("capacity_kw", 0)),
+                    "  Shades: {}".format(pv.get("shade_count", 0)),
+                    "  Module: {}".format(pv.get("module_type", "-")),
+                    ""
+                ])
+            else:
+                lines.extend(["PHOTOVOLTAIC: Not configured", ""])
+            
+            # Solar HW Status
+            if "GDS_SOLHW_CONFIG" in sc.sticky and sc.sticky["GDS_SOLHW_CONFIG"].get("enabled"):
+                solhw = sc.sticky["GDS_SOLHW_CONFIG"]
+                lines.extend([
+                    "SOLAR HOT WATER:",
+                    "  Equipment: {}".format(solhw.get("equipment_type", "-")),
+                    "  Area: {} m²".format(solhw.get("collector_area", 0)),
+                    "  Efficiency: {:.0%}".format(solhw.get("efficiency", 0)),
+                    ""
+                ])
+            else:
+                lines.extend(["SOLAR HOT WATER: Not enabled", ""])
+            
+            lines.extend([
+                "=" * 35,
+                "Use HB components to apply:",
+                "  PV: HB Photovoltaic Properties",
+                "  SHW: HB SHW System",
+            ])
+            
+            self.txt_pv_summary.Text = "\n".join(lines)
+        except:
+            pass
+    
+    def _generate_all_idf(self, s, e):
+        """Generate IDF strings for Battery and Wind (Module 6 only)"""
+        import math
+        idf_parts = []
+        
+        # Battery IDF
+        if self.chk_battery.Checked:
+            capacity_j = float(self.num_batt_capacity.Value) * 3.6e6
+            power_w = float(self.num_batt_power.Value) * 1000
+            eff = float(self.num_batt_efficiency.Value)
+            single_eff = math.sqrt(eff)
+            
+            battery_idf = """! GDS Battery Storage System
+ElectricLoadCenter:Storage:Simple,
+    GDS_Battery,             !- Name
+    Always On Discrete,      !- Availability Schedule Name
+    ,                        !- Zone Name
+    0,                       !- Radiative Fraction
+    {:.3f},                  !- Nominal Energetic Efficiency for Charging
+    {:.3f},                  !- Nominal Discharging Energetic Efficiency
+    {:.0f},                  !- Maximum Storage Capacity {{J}}
+    {:.0f},                  !- Maximum Power for Discharging {{W}}
+    {:.0f},                  !- Maximum Power for Charging {{W}}
+    {:.0f};                  !- Initial State of Charge {{J}}
+""".format(single_eff, single_eff, capacity_j, power_w, power_w, capacity_j * 0.5)
+            idf_parts.append(battery_idf)
+        
+        # Wind IDF
+        if self.chk_wind.Checked:
+            power_w = float(self.num_wind_power.Value) * 1000
+            hub = float(self.num_wind_hub.Value)
+            rotor = float(self.num_wind_rotor.Value)
+            
+            wind_idf = """! GDS Wind Turbine Generator
+Generator:WindTurbine,
+    GDS_WindTurbine,         !- Name
+    Always On Discrete,      !- Availability Schedule Name
+    HorizontalAxisWindTurbine, !- Rotor Type
+    VariableSpeedVariablePitch, !- Power Control
+    150,                     !- Rated Rotor Speed {{rpm}}
+    {:.1f},                  !- Rotor Diameter {{m}}
+    {:.1f},                  !- Overall Height {{m}}
+    3,                       !- Number of Blades
+    {:.0f},                  !- Rated Power {{W}}
+    10.0,                    !- Rated Wind Speed {{m/s}}
+    3.0,                     !- Cut In Wind Speed {{m/s}}
+    25.0,                    !- Cut Out Wind Speed {{m/s}}
+    0.835,                   !- Fraction System Efficiency
+    7.0,                     !- Maximum Tip Speed Ratio
+    0.40,                    !- Maximum Power Coefficient
+    ,                        !- Annual Local Average Wind Speed
+    {:.1f};                  !- Height for Local Average Wind Speed {{m}}
+""".format(rotor, hub + rotor/2, power_w, hub)
+            idf_parts.append(wind_idf)
+        
+        if idf_parts:
+            self.txt_idf_preview.Text = "\n".join(idf_parts)
+            
+            # Store in sticky for downstream components
+            sc.sticky["GDS_RENEWABLES_IDF"] = "\n".join(idf_parts)
+        else:
+            self.txt_idf_preview.Text = "! No IDF systems enabled.\n! Enable Battery or Wind and click Generate.\n!\n! Note: PV and SHW use native HB components\n! (configured in Module 5)"
+    
+    def _send_idf_to_gh(self, s, e):
+        """Send IDF string to GH Panel for injection into HB Model"""
+        try:
+            idf_text = self.txt_idf_preview.Text.strip()
+            
+            # Check if there's actual IDF content (not just comments)
+            has_content = False
+            for line in idf_text.split('\n'):
+                line = line.strip()
+                if line and not line.startswith('!'):
+                    has_content = True
+                    break
+            
+            if not has_content:
+                Forms.MessageBox.Show(
+                    self,
+                    "No IDF objects to send.\n\nEnable Battery or Wind, configure settings,\nthen click 'Generate IDF' first.",
+                    "No IDF Content",
+                    Forms.MessageBoxButtons.OK,
+                    Forms.MessageBoxType.Warning
+                )
+                return
+            
+            # Send to named panel
+            set_panel_text(NAME_IDF_INJECTION, idf_text)
+            
+            Forms.MessageBox.Show(
+                self,
+                "IDF sent to Panel: '{}'\n\nConnect this panel to HB Model's\nadditional_str_ input for injection.".format(NAME_IDF_INJECTION),
+                "IDF Sent to GH",
+                Forms.MessageBoxButtons.OK,
+                Forms.MessageBoxType.Information
+            )
+            
+        except Exception as ex:
+            Forms.MessageBox.Show(
+                self,
+                "Error sending IDF: {}\n\nMake sure a Panel named '{}' exists on the canvas.".format(ex, NAME_IDF_INJECTION),
+                "Send Failed",
+                Forms.MessageBoxButtons.OK,
+                Forms.MessageBoxType.Error
+            )
+    
+    def _copy_idf_to_clipboard(self, s, e):
+        """Copy IDF text to clipboard"""
+        try:
+            text = self.txt_idf_preview.Text
+            if text:
+                Forms.Clipboard.SetString(text)
+                Forms.MessageBox.Show(self, "IDF copied to clipboard!", "Success",
+                                     Forms.MessageBoxButtons.OK, Forms.MessageBoxType.Information)
+        except Exception as ex:
+            Forms.MessageBox.Show(self, "Error: {}".format(ex), "Copy Failed",
+                                 Forms.MessageBoxButtons.OK, Forms.MessageBoxType.Error)
+    
+    def _toggle_idf_customize(self, s, e):
+        """Toggle IDF preview between read-only and editable mode"""
+        self._idf_customizing = not self._idf_customizing
+        self.txt_idf_preview.ReadOnly = not self._idf_customizing
+        
+        if self._idf_customizing:
+            # Entering edit mode
+            self.btn_customize_idf.Text = "Lock (Exit Edit Mode)"
+            self.txt_idf_preview.BackgroundColor = Drawing.Color.FromArgb(255, 255, 240)  # Light yellow
+        else:
+            # Exiting edit mode
+            self.btn_customize_idf.Text = "Customize from Here"
+            self.txt_idf_preview.BackgroundColor = Drawing.Colors.White
+    
+    # ==================== HVAC MODULE HANDLERS (Simplified) ====================
+    
+    def _update_hvac_details(self):
+        """Update details text based on selected preset"""
+        try:
+            name = str(self.dd_hvac_preset.SelectedValue)
+            if name in HVAC_BUILDING_PRESETS:
+                p = HVAC_BUILDING_PRESETS[name]
+                txt = "Building Type: {}\n".format(name)
+                txt += "Description: {}\n\n".format(p.get('description', ''))
+                txt += "System Class: {}\n".format(p.get('class', ''))
+                txt += "Equipment: {}\n".format(p.get('equipment_type', ''))
+                txt += "Vintage: {}\n\n".format(p.get('vintage', ''))
+                txt += "Economizer: {}\n".format(p.get('economizer_type', ''))
+                txt += "Sensible HR: {:.0%}\n".format(p.get('sensible_heat_recovery', 0))
+                txt += "Latent HR: {:.0%}\n".format(p.get('latent_heat_recovery', 0))
+                txt += "DCV: {}".format("Yes" if p.get('demand_controlled_ventilation') else "No")
+                self.txt_hvac_details.Text = txt
+        except:
+            pass
+    
+    def _on_hvac_preset_changed(self, s, e):
+        """Handle preset dropdown change"""
+        self._update_hvac_details()
+    
+    def _hvac_set_default(self, s, e):
+        """Set selected preset as default HVAC"""
+        try:
+            name = str(self.dd_hvac_preset.SelectedValue)
+            if name in HVAC_BUILDING_PRESETS:
+                p = HVAC_BUILDING_PRESETS[name]
+                config = {
+                    'preset_name': name,
+                    'class': p.get('class', 'IdealAirSystem'),
+                    'equipment_type': p.get('equipment_type', ''),
+                    'vintage': p.get('vintage', 'ASHRAE_2019'),
+                    'economizer_type': p.get('economizer_type', 'NoEconomizer'),
+                    'sensible_heat_recovery': p.get('sensible_heat_recovery', 0),
+                    'latent_heat_recovery': p.get('latent_heat_recovery', 0),
+                    'demand_controlled_ventilation': p.get('demand_controlled_ventilation', False),
+                }
+                sc.sticky[HVAC_DEFAULT_KEY] = config
+                self.lbl_hvac_status.Text = "Default set: {} - Apply via GDSGBE".format(name)
+        except Exception as ex:
+            self.lbl_hvac_status.Text = "Error: {}".format(str(ex))
+
+# --------------------------- run function ------------------------------------
+def _run(button_input):
+    if not button_input:
+        return False
+    
+    try:
+        if hasattr(sc.sticky, '__getitem__'):
+            ui = sc.sticky.get(KEY, None)
+            if ui and hasattr(ui, 'Visible') and ui.Visible:
+                ui.BringToFront()
+                ui.Focus()
+                return True
+    except:
+        pass
+    
+    try:
+        ui = GDSHubPanel()
+        try:
+            if Rhino.UI.RhinoEtoApp.MainWindow:
+                ui.Owner = Rhino.UI.RhinoEtoApp.MainWindow
+        except:
+            pass
+        
+        def _cleanup(sender, e):
+            try:
+                if DOC and hasattr(ui, '_on_solution_end') and ui._on_solution_end:
+                    DOC.SolutionEnd -= ui._on_solution_end
+            except:
+                pass
+            try:
+                if hasattr(sc.sticky, '__delitem__') and KEY in sc.sticky:
+                    sc.sticky.pop(KEY, None)
+            except:
+                pass
+        
+        ui.Closed += _cleanup
+        
+        try:
+            if hasattr(sc.sticky, '__setitem__'):
+                sc.sticky[KEY] = ui
+        except:
+            pass
+        
+        ui.Show()
+        return True
+    except Exception as e:
+        print("Error creating window: {}".format(e))
+        return False
+
+
+# Main execution
+try:
+    if RUN:
+        _run(True)
+except NameError:
+    print("Connect a Button component to 'RUN' input")
