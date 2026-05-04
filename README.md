@@ -110,7 +110,7 @@ software release:
 > DOI: [to be added]
 >
 > Du, C. Green Design Studio (GDS), SyracuseCoE, Syracuse University.
-> https://github.com/Chengbo-Du/gds
+> https://github.com/Chengbo-Du/green-design-studio
 
 A `CITATION.cff` file in this repository provides machine-readable
 citation metadata.
@@ -125,6 +125,6 @@ See `LICENSE` for the full license text.
 ## Questions and feedback
 
 For questions about GDS or to report issues, please [open an issue on
-GitHub](https://github.com/Chengbo-Du/gds/issues) or contact:
+GitHub](https://github.com/Chengbo-Du/green-design-studio/issues) or contact:
 > Dr. Chengbo Du — cdu113@syr.edu
 > Dr. Jianshun Zhang — jszhang@syr.edu
