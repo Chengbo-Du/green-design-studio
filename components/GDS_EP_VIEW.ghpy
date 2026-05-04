@@ -1,0 +1,1852 @@
+"""
+GDS Results Comparison Dashboard
+================================
+
+SPDX-License-Identifier: BSD-3-Clause
+Copyright (c) 2026 SyracuseCoE, Syracuse University. All rights reserved.
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the conditions stated in the
+LICENSE file distributed with this project are met.
+
+Author: Chengbo Du <cdu113@syr.edu>
+
+Compare two EnergyPlus SQL outputs (design vs reference) and produce an
+HTML dashboard covering energy, carbon, cost, HVAC, and comfort metrics.
+
+INPUTS:
+    _design_sql   : str   - Design case eplusout.sql (required)
+    _ref_sql      : str   - Reference case eplusout.sql (required)
+    _project_name : str   - Dashboard title (default "GDS Project")
+    _elec_carbon  : float - Electricity carbon [kg CO2/kWh] (default 0.125)
+    _gas_carbon   : float - Gas carbon [kg CO2/kWh] (default 0.181)
+    _elec_rate    : float - Electricity rate [$/kWh] (default 0.166)
+    _gas_rate     : float - Gas rate [$/kWh] (default 0.04)
+    _auto_open    : bool  - Open HTML in browser (default True)
+    _run          : bool  - Set True to execute (required)
+
+OUTPUTS:
+    html_path : str - Path to generated HTML dashboard
+    report    : str - Text summary of comparison results
+    monthly_design_total    : list[float] - Design monthly total energy [kWh], 12 values
+    monthly_design_elec     : list[float] - Design monthly electricity [kWh], 12 values
+    monthly_design_gas      : list[float] - Design monthly gas [kWh], 12 values
+    monthly_design_district : list[float] - Design monthly district energy [kWh], 12 values
+    monthly_ref_total       : list[float] - Reference monthly total energy [kWh], 12 values
+    monthly_ref_elec        : list[float] - Reference monthly electricity [kWh], 12 values
+    monthly_ref_gas         : list[float] - Reference monthly gas [kWh], 12 values
+    monthly_ref_district    : list[float] - Reference monthly district energy [kWh], 12 values
+
+Default emission and cost factors (Syracuse, NY):
+[1] Electricity carbon, 0.125 kg CO2/kWh.
+    U.S. EPA, eGRID2022 (17th edition, Jan 2024). Subregion NYUP (NPCC
+    Upstate NY), annual output emission rate 274.6 lb CO2/MWh.
+    https://www.epa.gov/egrid
+[2] Natural gas carbon, 0.181 kg CO2/kWh.
+    U.S. EPA, 40 CFR Part 98 Subpart C, Table C-1. Default factor for
+    natural gas 53.06 kg CO2/MMBtu = 0.181 kg CO2/kWh.
+    https://www.epa.gov/climateleadership/ghg-emission-factors-hub
+[3] Electricity rate, $0.166/kWh.
+    U.S. EIA, Form EIA-861. Average residential price, Syracuse, NY
+    (NYSEG service territory), 2024.
+    https://www.eia.gov/electricity/monthly/
+[4] Natural gas rate, $0.04/kWh (~$1.17/therm).
+    U.S. EIA, Natural Gas Prices by sector and state. New York
+    residential average, 2024.
+    https://www.eia.gov/dnav/ng/ng_pri_sum_dcu_SNY_a.htm
+
+For other locations, override with EPA eGRID (electricity carbon),
+EPA 40 CFR 98 Table C-1 (gas carbon), and EIA state-level rate data.
+"""
+
+import os
+import json
+import sqlite3
+import webbrowser
+from datetime import datetime
+
+# --- SQL PARSER (inlined from gds_compare_parser.py) ---
+
+class SQLParser:
+    """Parse EnergyPlus SQL file with comprehensive metrics and VDS scoring."""
+
+    def __init__(self, sql_path, elec_carbon=0.125, gas_carbon=0.181,
+                 elec_rate=0.166, gas_rate=0.04):
+        self.sql_path = sql_path
+        self.elec_carbon = elec_carbon
+        self.gas_carbon = gas_carbon
+        self.elec_rate = elec_rate
+        self.gas_rate = gas_rate
+        self.data = {'energy': {}, 'comfort': {}, 'performance': {},
+
+                     }
+
+    def parse(self):
+        if not os.path.exists(self.sql_path):
+            raise FileNotFoundError("SQL not found: {}".format(self.sql_path))
+        conn = sqlite3.connect(self.sql_path)
+        cur = conn.cursor()
+        
+        # Check for tabular data — TabularDataWithStrings is a VIEW (not table) in E+
+        cur.execute("SELECT name FROM sqlite_master WHERE name='TabularDataWithStrings'")
+        has_tdws = cur.fetchone() is not None
+        
+        if not has_tdws:
+            # View missing — check if underlying tables exist and recreate it
+            cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='TabularData'")
+            has_td = cur.fetchone() is not None
+            cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='Strings'")
+            has_str = cur.fetchone() is not None
+            
+            if has_td and has_str:
+                # Recreate the view that E+ should have created
+                cur.execute("""
+                    CREATE TEMP VIEW TabularDataWithStrings AS
+                    SELECT
+                        td.TabularDataIndex,
+                        TRIM(s1.Value) AS ReportName,
+                        TRIM(s2.Value) AS ReportForString,
+                        TRIM(s3.Value) AS TableName,
+                        TRIM(s4.Value) AS RowName,
+                        TRIM(s5.Value) AS ColumnName,
+                        TRIM(s6.Value) AS Units,
+                        TRIM(td.Value) AS Value
+                    FROM TabularData td
+                    LEFT JOIN Strings s1 ON s1.StringIndex = td.ReportNameIndex
+                    LEFT JOIN Strings s2 ON s2.StringIndex = td.ReportForStringIndex
+                    LEFT JOIN Strings s3 ON s3.StringIndex = td.TableNameIndex
+                    LEFT JOIN Strings s4 ON s4.StringIndex = td.RowNameIndex
+                    LEFT JOIN Strings s5 ON s5.StringIndex = td.ColumnNameIndex
+                    LEFT JOIN Strings s6 ON s6.StringIndex = td.UnitsIndex
+                """)
+                print("TabularDataWithStrings view recreated from TabularData + Strings")
+            else:
+                diag = self._build_diagnostics(cur)
+                conn.close()
+                raise RuntimeError("\n".join(diag))
+        else:
+            print("TabularDataWithStrings view found")
+        
+        # Performance: materialize into temp table for faster repeated queries
+        cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='TabularDataWithStrings'")
+        if not cur.fetchone():
+            # It's a view — materialize with TRIM on all text columns
+            print("Materializing view into temp table...")
+            cur.execute("""CREATE TEMP TABLE _TDWSMat AS 
+                SELECT TabularDataIndex, 
+                       TRIM(ReportName) AS ReportName,
+                       TRIM(ReportForString) AS ReportForString,
+                       TRIM(TableName) AS TableName,
+                       TRIM(RowName) AS RowName,
+                       TRIM(ColumnName) AS ColumnName,
+                       TRIM(Units) AS Units,
+                       TRIM(Value) AS Value
+                FROM TabularDataWithStrings""")
+            cur.execute("DROP VIEW IF EXISTS TabularDataWithStrings")
+            cur.execute("ALTER TABLE _TDWSMat RENAME TO TabularDataWithStrings")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_tdws_table ON TabularDataWithStrings(TableName)")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_tdws_row ON TabularDataWithStrings(RowName)")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_tdws_col ON TabularDataWithStrings(ColumnName)")
+            print("Materialized + indexed")
+        
+        self._parse_energy(cur)
+        # Diagnostic: check energy parsing results
+        e = self.data['energy']
+        print("  siteEUI={}, totalElec={}, totalGas={}, totalDistrict={}".format(
+            e['siteEUI'], e['totalElectricity'], e['totalGas'], e['totalDistrict']))
+        print("  endUses: {}".format(e['endUses']))
+        print("  peakHeating={} kW, peakCooling={} kW".format(e['peakHeating'], e['peakCooling']))
+        if e['totalElectricity'] == 0 and e['siteEUI'] > 0:
+            # End uses failed but site energy exists — dump available data
+            cur.execute("SELECT DISTINCT TableName FROM TabularDataWithStrings LIMIT 20")
+            print("  Available TableNames: {}".format([r[0] for r in cur.fetchall()]))
+            cur.execute("SELECT DISTINCT ColumnName FROM TabularDataWithStrings "
+                       "WHERE TableName='End Uses' LIMIT 20")
+            print("  End Uses columns: {}".format([r[0] for r in cur.fetchall()]))
+        self._parse_monthly(cur)
+        print("  monthlyElec sum={:.0f}".format(sum(self.data['energy']['monthlyElec'])))
+        self._parse_monthly_by_category(cur)
+        self._parse_fuel_breakdown()
+        self._parse_unmet_hours(cur)
+        self._parse_hvac_sizing(cur)
+        hvac = self.data['energy'].get('hvacSizing', {})
+        print("  HVAC: heatCap={}, coolCap={}, hRatio={}, cRatio={}".format(
+            hvac.get('totalHeatingCapacity'), hvac.get('totalCoolingCapacity'),
+            hvac.get('heatingRatio'), hvac.get('coolingRatio')))
+        self._parse_comfort(cur)
+        self._calc_carbon_cost()
+        carbon = self.data['energy'].get('carbon', {})
+        cost = self.data['energy'].get('cost', {})
+        print("  Carbon: total={}, elec={}, gas={}, district={}".format(
+            carbon.get('total'), carbon.get('electricity'), carbon.get('gas'), carbon.get('district')))
+        print("  Cost: total={}, elec={}, gas={}, district={}".format(
+            cost.get('total'), cost.get('electricity'), cost.get('gas'), cost.get('district')))
+        self._calc_monthly_cost()
+        self._calc_standards_compliance()
+
+        conn.close()
+        return self.data
+    
+    @staticmethod
+    def _count_rows(cur, table):
+        cur.execute("SELECT COUNT(*) FROM \"{}\"".format(table))
+        return cur.fetchone()[0]
+    
+    def _build_diagnostics(self, cur):
+        """Build diagnostic info when no tabular data is found."""
+        diag = []
+        diag.append("=" * 60)
+        diag.append("GDS DIAGNOSTIC: No tabular data found")
+        diag.append("=" * 60)
+        diag.append("SQL path: {}".format(self.sql_path))
+        sql_size = os.path.getsize(self.sql_path)
+        diag.append("SQL size: {} bytes ({:.1f} MB)".format(sql_size, sql_size/1e6))
+        import time
+        sql_mtime = os.path.getmtime(self.sql_path)
+        diag.append("SQL modified: {}".format(
+            time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(sql_mtime))))
+        cur.execute("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")
+        tables = [r[0] for r in cur.fetchall()]
+        diag.append("Tables in SQL ({} total):".format(len(tables)))
+        for t in tables:
+            cnt = self._count_rows(cur, t)
+            diag.append("  - {} ({} rows)".format(t, cnt))
+        cur.execute("SELECT name FROM sqlite_master WHERE type='view' ORDER BY name")
+        views = [r[0] for r in cur.fetchall()]
+        diag.append("Views in SQL ({} total): {}".format(len(views), views))
+        # Check sibling IDF
+        sql_dir = os.path.dirname(self.sql_path)
+        for fname in os.listdir(sql_dir):
+            if fname.lower().endswith('.idf'):
+                idf_check = os.path.join(sql_dir, fname)
+                diag.append("\nIDF found: {}".format(fname))
+                with open(idf_check, 'r') as fcheck:
+                    idf_text = fcheck.read()
+                import re as re_diag
+                m = re_diag.search(r'(Output:SQLite[^;]*;)', idf_text)
+                diag.append("Output:SQLite in IDF: {}".format(
+                    m.group(1).strip() if m else "*** NOT FOUND ***"))
+                m2 = re_diag.search(r'(Output:Table:SummaryReports[^;]*;)', idf_text)
+                diag.append("SummaryReports in IDF: {}".format(
+                    m2.group(1).strip() if m2 else "*** NOT FOUND ***"))
+                break
+        else:
+            diag.append("\nNo IDF found in: {}".format(sql_dir))
+        diag.append("=" * 60)
+        return diag
+
+    # ----------------------------------------------------------
+    # Energy parsing
+    # ----------------------------------------------------------
+    def _parse_energy(self, cur):
+        """Site/source energy, end uses, peaks."""
+        def get_val(table, row, col, units=None):
+            q = ("SELECT Value FROM TabularDataWithStrings WHERE "
+                 "TableName='{}' AND RowName='{}' AND ColumnName='{}'".format(table, row, col))
+            if units:
+                q += " AND Units='{}'".format(units)
+            cur.execute(q)
+            r = cur.fetchone()
+            if r and r[0] and r[0].strip():
+                try:
+                    return float(r[0])
+                except ValueError:
+                    return 0
+            return 0
+
+        site_gj = get_val('Site and Source Energy', 'Total Site Energy', 'Total Energy', 'GJ')
+        source_gj = get_val('Site and Source Energy', 'Total Source Energy', 'Total Energy', 'GJ')
+        floor_area = get_val('Building Area', 'Total Building Area', 'Area') or 1
+        cond_area = get_val('Building Area', 'Net Conditioned Building Area', 'Area') or floor_area
+
+        site_kwh = site_gj * 277.78
+        source_kwh = source_gj * 277.78
+
+        # End uses (detailed)
+        end_uses, end_uses_elec, end_uses_gas, end_uses_district = {}, {}, {}, {}
+        mapping = [
+            ('Heating', 'heating'), ('Cooling', 'cooling'),
+            ('Interior Lighting', 'lighting'), ('Exterior Lighting', 'ext_lighting'),
+            ('Interior Equipment', 'equipment'), ('Exterior Equipment', 'ext_equipment'),
+            ('Fans', 'fans'), ('Pumps', 'pumps'),
+            ('Heat Rejection', 'heat_rejection'), ('Humidification', 'humidification'),
+            ('Heat Recovery', 'heat_recovery'), ('Water Systems', 'dhw'),
+            ('Refrigeration', 'refrigeration'), ('Generators', 'generators')
+        ]
+
+        for ep, key in mapping:
+            e = get_val('End Uses', ep, 'Electricity', 'GJ') * 277.78
+            g = get_val('End Uses', ep, 'Natural Gas', 'GJ') * 277.78
+            dc = get_val('End Uses', ep, 'District Cooling', 'GJ') * 277.78
+            dhw = get_val('End Uses', ep, 'District Heating Water', 'GJ') * 277.78
+            dhs = get_val('End Uses', ep, 'District Heating Steam', 'GJ') * 277.78
+            dist = dc + dhw + dhs
+            total = e + g + dist
+            if total > 0:
+                end_uses[key] = round(total)
+                end_uses_elec[key] = round(e)
+                end_uses_gas[key] = round(g)
+                end_uses_district[key] = round(dist)
+
+        # Peak loads — try system-level first, fall back to zone sizing sums
+        peak_heat, peak_cool = 0, 0
+        # Method 1: System-level peak from equipment summary tables
+        cur.execute("SELECT Value FROM TabularDataWithStrings WHERE "
+                    "TableName LIKE '%Heating%' AND ColumnName LIKE '%Peak%' "
+                    "AND Units='W' LIMIT 1")
+        r = cur.fetchone()
+        peak_heat = float(r[0]) / 1000 if r and r[0] else 0
+        cur.execute("SELECT Value FROM TabularDataWithStrings WHERE "
+                    "TableName LIKE '%Cooling%' AND ColumnName LIKE '%Peak%' "
+                    "AND Units='W' LIMIT 1")
+        r = cur.fetchone()
+        peak_cool = float(r[0]) / 1000 if r and r[0] else 0
+        # Method 2: Sum zone-level design loads (for zone equipment like baseboard)
+        if peak_heat == 0:
+            cur.execute("SELECT SUM(CAST(Value AS REAL)) FROM TabularDataWithStrings WHERE "
+                        "TableName='Zone Sensible Heating' AND ColumnName='User Design Load' "
+                        "AND Units='W'")
+            r = cur.fetchone()
+            if r and r[0]:
+                peak_heat = float(r[0]) / 1000
+        if peak_cool == 0:
+            cur.execute("SELECT SUM(CAST(Value AS REAL)) FROM TabularDataWithStrings WHERE "
+                        "TableName='Zone Sensible Cooling' AND ColumnName='User Design Load' "
+                        "AND Units='W'")
+            r = cur.fetchone()
+            if r and r[0]:
+                peak_cool = float(r[0]) / 1000
+
+        self.data['energy'] = {
+            'siteEUI': round(site_kwh / floor_area, 1),
+            'sourceEUI': round(source_kwh / floor_area, 1),
+            'totalSiteEnergy': round(site_kwh),
+            'totalSourceEnergy': round(source_kwh),
+            'floorArea': round(floor_area, 1),
+            'conditionedArea': round(cond_area, 1),
+            'peakHeating': round(peak_heat, 1),
+            'peakCooling': round(peak_cool, 1),
+            'endUses': end_uses,
+            'endUsesElec': end_uses_elec,
+            'endUsesGas': end_uses_gas,
+            'endUsesDistrict': end_uses_district,
+            'totalElectricity': sum(end_uses_elec.values()),
+            'totalGas': sum(end_uses_gas.values()),
+            'totalDistrict': sum(end_uses_district.values()),
+            'monthlyElec': [0]*12,
+            'monthlyGas': [0]*12,
+            'monthlyByCategory': {},
+            'monthly': {'heating': [0]*12, 'cooling': [0]*12}
+        }
+
+    # ----------------------------------------------------------
+    # Monthly energy
+    # ----------------------------------------------------------
+    def _parse_monthly(self, cur):
+        """Monthly energy by fuel type from meter data."""
+        monthly_elec, monthly_gas, monthly_district = [0]*12, [0]*12, [0]*12
+
+        try:
+            cur.execute("SELECT ReportDataDictionaryIndex FROM ReportDataDictionary "
+                       "WHERE Name='Electricity:Facility' AND ReportingFrequency='Monthly'")
+            elec_idx = cur.fetchone()
+            if elec_idx:
+                cur.execute("SELECT t.Month, SUM(rd.Value) "
+                           "FROM ReportData rd JOIN Time t ON rd.TimeIndex=t.TimeIndex "
+                           "WHERE rd.ReportDataDictionaryIndex=? "
+                           "AND t.Month BETWEEN 1 AND 12 AND t.Year > 0 "
+                           "GROUP BY t.Month ORDER BY t.Month", (elec_idx[0],))
+                for row in cur.fetchall():
+                    m = int(row[0]) - 1
+                    if 0 <= m < 12:
+                        monthly_elec[m] = row[1] / 3600000
+
+            cur.execute("SELECT ReportDataDictionaryIndex FROM ReportDataDictionary "
+                       "WHERE Name LIKE '%Gas:Facility' AND ReportingFrequency='Monthly'")
+            gas_idx = cur.fetchone()
+            if gas_idx:
+                cur.execute("SELECT t.Month, SUM(rd.Value) "
+                           "FROM ReportData rd JOIN Time t ON rd.TimeIndex=t.TimeIndex "
+                           "WHERE rd.ReportDataDictionaryIndex=? "
+                           "AND t.Month BETWEEN 1 AND 12 AND t.Year > 0 "
+                           "GROUP BY t.Month ORDER BY t.Month", (gas_idx[0],))
+                for row in cur.fetchall():
+                    m = int(row[0]) - 1
+                    if 0 <= m < 12:
+                        monthly_gas[m] = row[1] / 3600000
+
+            for meter_name in ['DistrictCooling:Facility', 'DistrictHeatingWater:Facility',
+                               'DistrictHeatingSteam:Facility']:
+                cur.execute("SELECT ReportDataDictionaryIndex FROM ReportDataDictionary "
+                           "WHERE Name=? AND ReportingFrequency='Monthly'", (meter_name,))
+                d_idx = cur.fetchone()
+                if d_idx:
+                    cur.execute("SELECT t.Month, SUM(rd.Value) "
+                               "FROM ReportData rd JOIN Time t ON rd.TimeIndex=t.TimeIndex "
+                               "WHERE rd.ReportDataDictionaryIndex=? "
+                               "AND t.Month BETWEEN 1 AND 12 AND t.Year > 0 "
+                               "GROUP BY t.Month ORDER BY t.Month", (d_idx[0],))
+                    for row in cur.fetchall():
+                        m_idx = int(row[0]) - 1
+                        if 0 <= m_idx < 12:
+                            monthly_district[m_idx] += row[1] / 3600000
+        except Exception:
+            pass
+
+        # Fallback: try hourly/timestep and aggregate
+        if sum(monthly_elec) == 0:
+            try:
+                cur.execute("SELECT ReportDataDictionaryIndex FROM ReportDataDictionary "
+                           "WHERE Name='Electricity:Facility' LIMIT 1")
+                elec_idx = cur.fetchone()
+                if elec_idx:
+                    cur.execute("SELECT t.Month, SUM(rd.Value) "
+                               "FROM ReportData rd JOIN Time t ON rd.TimeIndex=t.TimeIndex "
+                               "WHERE rd.ReportDataDictionaryIndex=? "
+                               "AND t.Month BETWEEN 1 AND 12 AND t.Year > 0 "
+                               "GROUP BY t.Month ORDER BY t.Month", (elec_idx[0],))
+                    for row in cur.fetchall():
+                        m = int(row[0]) - 1
+                        if 0 <= m < 12:
+                            monthly_elec[m] = row[1] / 3600000
+            except Exception:
+                pass
+
+        if sum(monthly_gas) == 0:
+            try:
+                cur.execute("SELECT ReportDataDictionaryIndex FROM ReportDataDictionary "
+                           "WHERE Name LIKE '%Gas:Facility' LIMIT 1")
+                gas_idx = cur.fetchone()
+                if gas_idx:
+                    cur.execute("SELECT t.Month, SUM(rd.Value) "
+                               "FROM ReportData rd JOIN Time t ON rd.TimeIndex=t.TimeIndex "
+                               "WHERE rd.ReportDataDictionaryIndex=? "
+                               "AND t.Month BETWEEN 1 AND 12 AND t.Year > 0 "
+                               "GROUP BY t.Month ORDER BY t.Month", (gas_idx[0],))
+                    for row in cur.fetchall():
+                        m = int(row[0]) - 1
+                        if 0 <= m < 12:
+                            monthly_gas[m] = row[1] / 3600000
+            except Exception:
+                pass
+
+        # Final fallback: distribute annual evenly
+        if sum(monthly_elec) == 0:
+            monthly_elec = [self.data['energy']['totalElectricity'] / 12] * 12
+        if sum(monthly_gas) == 0 and self.data['energy']['totalGas'] > 0:
+            pattern = [0.18, 0.15, 0.12, 0.05, 0.01, 0, 0, 0, 0.01, 0.06, 0.12, 0.16]
+            total = sum(pattern)
+            monthly_gas = [self.data['energy']['totalGas'] * p / total for p in pattern]
+        if sum(monthly_district) == 0 and self.data['energy']['totalDistrict'] > 0:
+            monthly_district = [self.data['energy']['totalDistrict'] / 12] * 12
+
+        self.data['energy']['monthlyElec'] = monthly_elec
+        self.data['energy']['monthlyGas'] = monthly_gas
+        self.data['energy']['monthlyDistrict'] = monthly_district
+        self.data['energy']['monthlyTotal'] = [e + g + d for e, g, d in
+            zip(monthly_elec, monthly_gas, monthly_district)]
+
+    def _parse_monthly_by_category(self, cur):
+        """Monthly energy by end-use category (estimated from annual patterns)."""
+        cats = {
+            'heating': [0.18, 0.15, 0.12, 0.05, 0.01, 0, 0, 0, 0.01, 0.06, 0.12, 0.16],
+            'cooling': [0, 0, 0.02, 0.06, 0.12, 0.18, 0.22, 0.20, 0.12, 0.06, 0.02, 0]
+        }
+        monthly_cat = {}
+        for cat, pattern in cats.items():
+            if cat in self.data['energy']['endUses']:
+                total_p = sum(pattern)
+                annual = self.data['energy']['endUses'][cat]
+                monthly_cat[cat] = [round(annual * p / total_p) for p in pattern]
+        for cat in ['lighting', 'equipment', 'fans', 'dhw']:
+            if cat in self.data['energy']['endUses']:
+                monthly_cat[cat] = [round(self.data['energy']['endUses'][cat] / 12)] * 12
+
+        self.data['energy']['monthlyByCategory'] = monthly_cat
+        self.data['energy']['monthly']['heating'] = monthly_cat.get('heating', [0]*12)
+        self.data['energy']['monthly']['cooling'] = monthly_cat.get('cooling', [0]*12)
+
+    def _parse_fuel_breakdown(self):
+        """Fuel percentage breakdown."""
+        total_elec = self.data['energy']['totalElectricity']
+        total_gas = self.data['energy']['totalGas']
+        total_district = self.data['energy']['totalDistrict']
+        total = total_elec + total_gas + total_district
+        self.data['energy']['fuelBreakdown'] = {
+            'electricity': {
+                'total': total_elec,
+                'percentage': round(total_elec / total * 100, 1) if total > 0 else 0
+            },
+            'naturalGas': {
+                'total': total_gas,
+                'percentage': round(total_gas / total * 100, 1) if total > 0 else 0
+            },
+            'district': {
+                'total': total_district,
+                'percentage': round(total_district / total * 100, 1) if total > 0 else 0
+            }
+        }
+
+    # ----------------------------------------------------------
+    # Unmet hours
+    # ----------------------------------------------------------
+    def _parse_unmet_hours(self, cur):
+        """Unmet setpoint hours (facility + zone-level)."""
+        cur.execute("SELECT Value FROM TabularDataWithStrings WHERE "
+                    "TableName LIKE '%Setpoint Not Met%' AND RowName='Facility' "
+                    "AND ColumnName LIKE '%Heating%'")
+        r = cur.fetchone()
+        heat = float(r[0]) if r and r[0] and r[0].strip() else 0
+        cur.execute("SELECT Value FROM TabularDataWithStrings WHERE "
+                    "TableName LIKE '%Setpoint Not Met%' AND RowName='Facility' "
+                    "AND ColumnName LIKE '%Cooling%'")
+        r = cur.fetchone()
+        cool = float(r[0]) if r and r[0] and r[0].strip() else 0
+        total = heat + cool
+
+        zone_unmet = []
+        cur.execute("SELECT RowName, Value FROM TabularDataWithStrings WHERE "
+                    "TableName LIKE '%Setpoint Not Met%' "
+                    "AND ColumnName LIKE '%Heating%' AND RowName != 'Facility'")
+        heating_by_zone = {r[0]: float(r[1]) if r[1] and r[1].strip() else 0 for r in cur.fetchall()}
+        cur.execute("SELECT RowName, Value FROM TabularDataWithStrings WHERE "
+                    "TableName LIKE '%Setpoint Not Met%' "
+                    "AND ColumnName LIKE '%Cooling%' AND RowName != 'Facility'")
+        cooling_by_zone = {r[0]: float(r[1]) if r[1] and r[1].strip() else 0 for r in cur.fetchall()}
+
+        all_zones = set(heating_by_zone.keys()) | set(cooling_by_zone.keys())
+        for zone in list(all_zones):
+            h = heating_by_zone.get(zone, 0)
+            c = cooling_by_zone.get(zone, 0)
+            if h > 0 or c > 0:
+                zone_unmet.append({
+                    'name': zone, 'heating': round(h, 1),
+                    'cooling': round(c, 1), 'total': round(h + c, 1)
+                })
+        zone_unmet.sort(key=lambda x: x['total'], reverse=True)
+
+        self.data['energy']['unmetHours'] = {
+            'heating': round(heat, 1), 'cooling': round(cool, 1),
+            'total': round(total, 1), 'limit': 300,
+            'compliant': total <= 300,
+            'byZone': zone_unmet
+        }
+
+    # ----------------------------------------------------------
+    # HVAC sizing
+    # ----------------------------------------------------------
+    def _parse_hvac_sizing(self, cur):
+        """HVAC equipment capacity and sizing ratios."""
+        heating_equip, cooling_equip = [], []
+        heat_cap, cool_cap = 0, 0
+
+        # Heating coils — TableName is 'Heating Coils' or 'DX Heating Coils'
+        cur.execute("SELECT RowName, Value FROM TabularDataWithStrings WHERE "
+                    "(TableName='Heating Coils' OR TableName='DX Heating Coils') "
+                    "AND ColumnName LIKE '%Capacity%' AND Units='W'")
+        for r in cur.fetchall():
+            if r[1]:
+                try:
+                    cap = float(r[1]) / 1000
+                    if cap > 0:
+                        heat_cap += cap
+                        heating_equip.append({'name': r[0][:30], 'capacity': round(cap, 1)})
+                except:
+                    pass
+
+        # Cooling coils — TableName is 'Cooling Coils' or 'DX Cooling Coils'
+        cur.execute("SELECT RowName, Value FROM TabularDataWithStrings WHERE "
+                    "(TableName='Cooling Coils' OR TableName='DX Cooling Coils') "
+                    "AND ColumnName LIKE '%Capacity%' AND Units='W'")
+        for r in cur.fetchall():
+            if r[1]:
+                try:
+                    cap = float(r[1]) / 1000
+                    if cap > 0:
+                        cool_cap += cap
+                        cooling_equip.append({'name': r[0][:30], 'capacity': round(cap, 1)})
+                except:
+                    pass
+
+        peak_h = self.data['energy']['peakHeating']
+        peak_c = self.data['energy']['peakCooling']
+        h_ratio = round(heat_cap / peak_h, 2) if peak_h > 0 else 0
+        c_ratio = round(cool_cap / peak_c, 2) if peak_c > 0 else 0
+
+        self.data['energy']['hvacSizing'] = {
+            'heatingEquipment': heating_equip[:5],
+            'coolingEquipment': cooling_equip[:5],
+            'totalHeatingCapacity': round(heat_cap, 1),
+            'totalCoolingCapacity': round(cool_cap, 1),
+            'heatingRatio': h_ratio,
+            'coolingRatio': c_ratio,
+            'heatingOversized': h_ratio > 1.3,
+            'coolingOversized': c_ratio > 1.3
+        }
+
+    # ----------------------------------------------------------
+    # Comfort
+    # ----------------------------------------------------------
+    def _parse_comfort(self, cur):
+        """Thermal comfort (PMV/PPD by zone)."""
+        cur.execute("SELECT DISTINCT KeyValue FROM ReportDataDictionary "
+                    "WHERE Name LIKE '%Fanger Model PPD%'")
+        zones = [r[0] for r in cur.fetchall()]
+        if not zones:
+            self.data['comfort'] = {'avgPMV': 0, 'avgPPD': 0, 'comfortHours': 0,
+                                    'totalOccupiedHours': 8760, 'zones': []}
+            return
+
+        zone_data = []
+        for zone in zones:
+            cur.execute("SELECT ReportDataDictionaryIndex FROM "
+                       "ReportDataDictionary WHERE Name LIKE '%PMV%' "
+                       "AND KeyValue='{}'".format(zone))
+            pmv_idx = cur.fetchone()
+            cur.execute("SELECT ReportDataDictionaryIndex FROM "
+                       "ReportDataDictionary WHERE Name LIKE '%PPD%' "
+                       "AND KeyValue='{}'".format(zone))
+            ppd_idx = cur.fetchone()
+            pmv, ppd = 0, 0
+            if pmv_idx:
+                cur.execute("SELECT AVG(Value) FROM ReportData "
+                           "WHERE ReportDataDictionaryIndex={}".format(pmv_idx[0]))
+                r = cur.fetchone()
+                pmv = float(r[0]) if r and r[0] else 0
+            if ppd_idx:
+                cur.execute("SELECT AVG(Value) FROM ReportData "
+                           "WHERE ReportDataDictionaryIndex={}".format(ppd_idx[0]))
+                r = cur.fetchone()
+                ppd = float(r[0]) if r and r[0] else 0
+            if ppd > 0:
+                zone_data.append({
+                    'name': zone, 'pmv': round(pmv, 2), 'ppd': round(ppd, 1),
+                    'comfortPct': max(0, min(100, round(100 - ppd)))
+                })
+
+        avg_ppd = sum(z['ppd'] for z in zone_data) / len(zone_data) if zone_data else 0
+        avg_pmv = sum(z['pmv'] for z in zone_data) / len(zone_data) if zone_data else 0
+
+        self.data['comfort'] = {
+            'avgPMV': round(avg_pmv, 2), 'avgPPD': round(avg_ppd, 1),
+            'comfortHours': round(8760 * (100 - avg_ppd) / 100) if avg_ppd > 0 else 0,
+            'totalOccupiedHours': 8760,
+            'zones': zone_data if zone_data else [{'name': 'No data', 'pmv': 0, 'ppd': 0, 'comfortPct': 0}]
+        }
+
+    # ----------------------------------------------------------
+    # Carbon, cost, monthly cost
+    # ----------------------------------------------------------
+    def _calc_carbon_cost(self):
+        """Carbon emissions and annual cost."""
+        elec = self.data['energy']['totalElectricity']
+        gas = self.data['energy']['totalGas']
+        district = self.data['energy']['totalDistrict']
+        area = self.data['energy']['floorArea']
+
+        c_elec = elec * self.elec_carbon
+        c_gas = gas * self.gas_carbon
+        c_district = district * self.gas_carbon  # Conservative estimate; district source varies
+        self.data['energy']['carbon'] = {
+            'electricity': round(c_elec), 'gas': round(c_gas),
+            'district': round(c_district),
+            'total': round(c_elec + c_gas + c_district),
+            'intensity': round((c_elec + c_gas + c_district) / area, 1) if area > 0 else 0
+        }
+
+        cost_elec = elec * self.elec_rate
+        cost_gas = gas * self.gas_rate
+        cost_district = district * self.gas_rate  # Use gas rate as proxy for district
+        self.data['energy']['cost'] = {
+            'electricity': round(cost_elec), 'gas': round(cost_gas),
+            'district': round(cost_district),
+            'total': round(cost_elec + cost_gas + cost_district),
+            'perArea': round((cost_elec + cost_gas + cost_district) / area, 2) if area > 0 else 0
+        }
+
+    def _calc_monthly_cost(self):
+        """Monthly cost breakdown."""
+        m_elec = self.data['energy']['monthlyElec']
+        m_gas = self.data['energy']['monthlyGas']
+        m_district = self.data['energy'].get('monthlyDistrict', [0]*12)
+        m_elec_cost = [round(e * self.elec_rate) for e in m_elec]
+        m_gas_cost = [round(g * self.gas_rate) for g in m_gas]
+        m_dist_cost = [round(d * self.gas_rate) for d in m_district]
+        m_total = [e + g + d for e, g, d in zip(m_elec_cost, m_gas_cost, m_dist_cost)]
+        self.data['energy']['monthlyCost'] = {
+            'electricity': m_elec_cost, 'gas': m_gas_cost,
+            'district': m_dist_cost, 'total': m_total
+        }
+
+    # ----------------------------------------------------------
+    # Standards compliance
+    # ----------------------------------------------------------
+    def _calc_standards_compliance(self):
+        """Summarize performance metrics for comparative analysis."""
+        e = self.data['energy']
+        c = self.data['comfort']
+
+        energy_cost = e.get('cost', {}).get('total', 0)
+        self.data['performance'] = {
+            'energyCost': {
+                'label': 'Energy Cost',
+                'metric': 'Energy Cost',
+                'value': energy_cost,
+                'unit': '$',
+                'connected': energy_cost > 0,
+                'note': 'Design vs reference comparison'
+            },
+            'siteEUI': {
+                'label': 'Site EUI',
+                'metric': 'Site EUI',
+                'value': e.get('siteEUI', 0),
+                'unit': 'kWh/m2/yr',
+                'connected': e.get('siteEUI', 0) > 0,
+                'note': 'Relative to reference case'
+            },
+            'unmetHours': {
+                'label': 'Unmet Setpoint Hours',
+                'metric': 'Unmet Setpoint Hours',
+                'value': e.get('unmetHours', {}).get('total', 0),
+                'limit': 300,
+                'unit': 'hours',
+                'compliant': e.get('unmetHours', {}).get('compliant', False),
+                'connected': True,
+                'note': '300 hrs is a common modeling threshold (verify applicability for your project)'
+            },
+            'thermalComfort': {
+                'label': 'Thermal Comfort (PPD)',
+                'metric': 'Thermal Comfort (PPD)',
+                'value': c.get('avgPPD', 0),
+                'limit': 20,
+                'unit': '%',
+                'compliant': 0 < c.get('avgPPD', 0) <= 20,
+                'connected': c.get('avgPPD', 0) > 0,
+                'zoneCount': len(c.get('zones', [])),
+                'zonesCompliant': sum(1 for z in c.get('zones', [])
+                                      if 0 < z.get('ppd', 99) <= 20),
+                'note': 'PPD < 10% corresponds to PMV within +/-0.5'
+            },
+            'hvacSizing': {
+                'label': 'HVAC Sizing',
+                'metric': 'HVAC Sizing Adequacy',
+                'heatingRatio': e.get('hvacSizing', {}).get('heatingRatio', 0),
+                'coolingRatio': e.get('hvacSizing', {}).get('coolingRatio', 0),
+                'unit': 'capacity/peak',
+                'connected': (e.get('hvacSizing', {}).get('heatingRatio', 0) > 0 or
+                              e.get('hvacSizing', {}).get('coolingRatio', 0) > 0),
+                'note': 'Ratio of installed capacity to design peak load'
+            },
+            'carbonIntensity': {
+                'label': 'Carbon Intensity',
+                'metric': 'Carbon Intensity',
+                'value': e.get('carbon', {}).get('intensity', 0),
+                'total': e.get('carbon', {}).get('total', 0),
+                'unit': 'kg CO2/m2',
+                'connected': e.get('carbon', {}).get('total', 0) > 0,
+                'note': 'Based on user-provided emission factors'
+            },
+
+        }
+
+# --- COMPARISON ENGINE ---
+
+def calc_comparison(design, reference):
+    """Calculate comparison metrics between design and reference cases."""
+    de = design.get('energy', {})
+    re = reference.get('energy', {})
+    dc = design.get('comfort', {})
+    rc = reference.get('comfort', {})
+
+    def calc_diff(d, r, lower_is_better=True):
+        if r == 0:
+            return {'design': d, 'reference': r, 'diff': 0, 'pct': 0, 'improved': False}
+        diff = d - r
+        pct = (diff / r) * 100
+        improved = diff < 0 if lower_is_better else diff > 0
+        return {'design': d, 'reference': r, 'diff': round(diff, 1),
+                'pct': round(pct, 1), 'improved': improved}
+
+    c = {
+        'siteEUI': calc_diff(de.get('siteEUI', 0), re.get('siteEUI', 0)),
+        'sourceEUI': calc_diff(de.get('sourceEUI', 0), re.get('sourceEUI', 0)),
+        'totalSiteEnergy': calc_diff(de.get('totalSiteEnergy', 0), re.get('totalSiteEnergy', 0)),
+        'totalElectricity': calc_diff(de.get('totalElectricity', 0), re.get('totalElectricity', 0)),
+        'totalGas': calc_diff(de.get('totalGas', 0), re.get('totalGas', 0)),
+        'totalDistrict': calc_diff(de.get('totalDistrict', 0), re.get('totalDistrict', 0)),
+        'heating': calc_diff(de.get('endUses', {}).get('heating', 0), re.get('endUses', {}).get('heating', 0)),
+        'cooling': calc_diff(de.get('endUses', {}).get('cooling', 0), re.get('endUses', {}).get('cooling', 0)),
+        'lighting': calc_diff(de.get('endUses', {}).get('lighting', 0), re.get('endUses', {}).get('lighting', 0)),
+        'equipment': calc_diff(de.get('endUses', {}).get('equipment', 0), re.get('endUses', {}).get('equipment', 0)),
+        'fans': calc_diff(de.get('endUses', {}).get('fans', 0), re.get('endUses', {}).get('fans', 0)),
+        'dhw': calc_diff(de.get('endUses', {}).get('dhw', 0), re.get('endUses', {}).get('dhw', 0)),
+        'carbon': calc_diff(de.get('carbon', {}).get('total', 0), re.get('carbon', {}).get('total', 0)),
+        'carbonIntensity': calc_diff(de.get('carbon', {}).get('intensity', 0), re.get('carbon', {}).get('intensity', 0)),
+        'cost': calc_diff(de.get('cost', {}).get('total', 0), re.get('cost', {}).get('total', 0)),
+        'ppd': calc_diff(dc.get('avgPPD', 0), rc.get('avgPPD', 0)),
+        'unmetHours': calc_diff(de.get('unmetHours', {}).get('total', 0), re.get('unmetHours', {}).get('total', 0)),
+        'peakHeating': calc_diff(de.get('peakHeating', 0), re.get('peakHeating', 0)),
+        'peakCooling': calc_diff(de.get('peakCooling', 0), re.get('peakCooling', 0)),
+    }
+
+    dmc = de.get('monthlyCost', {}).get('total', [0]*12)
+    rmc = re.get('monthlyCost', {}).get('total', [0]*12)
+    c['monthlyCostDiff'] = [round(d - r) for d, r in zip(dmc, rmc)]
+    c['annualSavings'] = round(re.get('cost', {}).get('total', 0) - de.get('cost', {}).get('total', 0))
+
+    ref_cost = re.get('cost', {}).get('total', 0)
+    des_cost = de.get('cost', {}).get('total', 0)
+    c['costSavingsPct'] = round((1 - des_cost / ref_cost) * 100, 1) if ref_cost > 0 else 0
+
+    ref_carbon = re.get('carbon', {}).get('total', 0)
+    des_carbon = de.get('carbon', {}).get('total', 0)
+    c['carbonReductionPct'] = round((1 - des_carbon / ref_carbon) * 100, 1) if ref_carbon > 0 else 0
+
+    ref_eui = re.get('siteEUI', 0)
+    des_eui = de.get('siteEUI', 0)
+    c['euiReductionPct'] = round((1 - des_eui / ref_eui) * 100, 1) if ref_eui > 0 else 0
+
+    return c
+
+def build_report(design, reference, comparison):
+    """Build a text summary report."""
+    c = comparison
+    de = design.get('energy', {})
+    re = reference.get('energy', {})
+    lines = []
+    lines.append("=" * 65)
+    lines.append("GDS RESULTS — DESIGN vs REFERENCE COMPARISON")
+    lines.append("=" * 65)
+
+    def fmt(m):
+        arrow = 'v' if m['improved'] else '^'
+        return "{} {:+.1f}%".format(arrow, m['pct'])
+
+    lines.append("")
+    lines.append("{:<25} {:>12} {:>12} {:>12}".format("Metric", "Design", "Reference", "Change"))
+    lines.append("-" * 65)
+    lines.append("{:<25} {:>12.1f} {:>12.1f} {:>12}".format(
+        "Site EUI (kWh/m2/yr)", c['siteEUI']['design'], c['siteEUI']['reference'], fmt(c['siteEUI'])))
+    lines.append("{:<25} {:>12,} {:>12,} {:>12}".format(
+        "Total Energy (kWh)", c['totalSiteEnergy']['design'], c['totalSiteEnergy']['reference'], fmt(c['totalSiteEnergy'])))
+    lines.append("{:<25} {:>12,} {:>12,} {:>12}".format(
+        "Heating (kWh)", c['heating']['design'], c['heating']['reference'], fmt(c['heating'])))
+    lines.append("{:<25} {:>12,} {:>12,} {:>12}".format(
+        "Cooling (kWh)", c['cooling']['design'], c['cooling']['reference'], fmt(c['cooling'])))
+    lines.append("{:<25} {:>12,} {:>12,} {:>12}".format(
+        "Carbon (kg CO2)", c['carbon']['design'], c['carbon']['reference'], fmt(c['carbon'])))
+    lines.append("{:<25} {:>12,} {:>12,} {:>12}".format(
+        "Annual Cost ($)", c['cost']['design'], c['cost']['reference'], fmt(c['cost'])))
+    lines.append("-" * 65)
+
+    if c['annualSavings'] > 0:
+        lines.append("\nAnnual Savings: ${:,}".format(c['annualSavings']))
+    elif c['annualSavings'] < 0:
+        lines.append("\nAnnual Extra Cost: ${:,}".format(-c['annualSavings']))
+
+    lines.append("\nEUI Reduction: {:.1f}%".format(c['euiReductionPct']))
+    lines.append("Carbon Reduction: {:.1f}%".format(c['carbonReductionPct']))
+    lines.append("Cost Savings: {:.1f}%".format(c['costSavingsPct']))
+
+    # Unmet hours
+    du = de.get('unmetHours', {})
+    ru = re.get('unmetHours', {})
+    lines.append("\nUnmet Hours:  Design={:.0f}h ({})  Reference={:.0f}h ({})".format(
+        du.get('total', 0), "Within threshold" if du.get('compliant') else "EXCEEDS threshold",
+        ru.get('total', 0), "Within threshold" if ru.get('compliant') else "EXCEEDS threshold"))
+
+    return "\n".join(lines)
+
+# --- HTML TEMPLATE ---
+
+def get_html_template():
+    return '''<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>GDS Results Comparison</title>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+:root{
+  --bg:#0c1220;--bg2:#141e33;--card:rgba(255,255,255,0.025);--card2:rgba(255,255,255,0.04);
+  --border:rgba(255,255,255,0.07);--border2:rgba(255,255,255,0.12);
+  --t1:#e8ecf4;--t2:#8b95a8;--t3:#5a6478;
+  --green:#4ade80;--green-bg:rgba(74,222,128,0.08);
+  --blue:#60a5fa;--blue-bg:rgba(96,165,250,0.08);
+  --orange:#fbbf24;--orange-bg:rgba(251,191,36,0.08);
+  --red:#f87171;--red-bg:rgba(248,113,113,0.08);
+  --purple:#a78bfa;--purple-bg:rgba(167,139,250,0.08);
+  --cyan:#22d3ee;--cyan-bg:rgba(34,211,238,0.08);
+  --design:#4ade80;--reference:#60a5fa;
+}
+body{font-family:'DM Sans',system-ui,sans-serif;background:var(--bg);color:var(--t1);min-height:100vh}
+.header{background:var(--bg2);border-bottom:1px solid var(--border);padding:14px 28px;display:flex;justify-content:space-between;align-items:center}
+.header h1{font-size:18px;font-weight:700;letter-spacing:-0.3px}
+.header h1 span{color:var(--green)}
+.meta{text-align:right;font-size:12px;color:var(--t3)}
+.meta .name{color:var(--t2);font-weight:500}
+.case-legend{display:flex;gap:16px;align-items:center;font-size:11px;color:var(--t2);margin-top:4px}
+.case-dot{width:8px;height:8px;border-radius:2px;display:inline-block;margin-right:4px}
+.tabs{display:flex;gap:2px;padding:0 28px;background:var(--bg2);border-bottom:1px solid var(--border);overflow-x:auto}
+.tab{padding:12px 18px;font-size:12px;font-weight:500;color:var(--t3);cursor:pointer;border-bottom:2px solid transparent;transition:all 0.2s;white-space:nowrap}
+.tab:hover{color:var(--t2)}
+.tab.active{color:var(--green);border-bottom-color:var(--green)}
+.main{padding:24px 28px;max-width:1440px;margin:0 auto}
+.section{display:none}.section.active{display:block}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:14px;margin-bottom:20px}
+.grid-2{display:grid;grid-template-columns:repeat(2,1fr);gap:14px;margin-bottom:20px}
+.grid-3{display:grid;grid-template-columns:repeat(3,1fr);gap:14px}
+.grid-5{display:grid;grid-template-columns:repeat(5,1fr);gap:14px;margin-bottom:20px}
+@media(max-width:900px){.grid-2,.grid-3,.grid-5{grid-template-columns:1fr}}
+.card{background:var(--card);border:1px solid var(--border);border-radius:10px;padding:18px}
+.card.span-2{grid-column:span 2}@media(max-width:900px){.card.span-2{grid-column:span 1}}
+.card-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:14px}
+.card-title{font-size:12px;font-weight:600;color:var(--t3);text-transform:uppercase;letter-spacing:0.8px}
+.badge{font-size:10px;padding:3px 10px;border-radius:10px;font-weight:500}
+.badge.green{background:var(--green-bg);color:var(--green)}
+.badge.red{background:var(--red-bg);color:var(--red)}
+.badge.blue{background:var(--blue-bg);color:var(--blue)}
+.badge.orange{background:var(--orange-bg);color:var(--orange)}
+.badge.neutral{background:rgba(255,255,255,0.05);color:var(--t2)}
+.metric{display:flex;align-items:baseline;gap:6px}
+.metric .val{font-size:28px;font-weight:700;font-family:'JetBrains Mono','DM Sans',monospace}
+.metric .unit{font-size:12px;color:var(--t3)}
+.metric-sm .val{font-size:22px}
+.label{font-size:11px;color:var(--t3);margin-top:2px}
+.cmp{display:inline-flex;align-items:center;gap:4px;font-size:11px;font-weight:500;margin-top:6px;padding:2px 8px;border-radius:4px}
+.cmp.pos{color:var(--green);background:var(--green-bg)}
+.cmp.neg{color:var(--red);background:var(--red-bg)}
+.kpi{text-align:center;padding:16px 10px}
+.kpi .val{font-size:32px;font-weight:700;font-family:'JetBrains Mono',monospace}
+.kpi .lbl{font-size:11px;color:var(--t3);margin-top:4px}
+.kpi .change{font-size:13px;font-weight:600;margin-top:6px}
+.kpi .change.pos{color:var(--green)}.kpi .change.neg{color:var(--red)}
+.cmp-row{display:flex;align-items:center;padding:10px 0;border-bottom:1px solid var(--border);gap:12px}
+.cmp-row:last-child{border-bottom:none}
+.cmp-label{width:100px;font-size:12px;color:var(--t2);flex-shrink:0}
+.cmp-bars{flex:1;display:flex;flex-direction:column;gap:3px}
+.cmp-bar{height:14px;border-radius:3px;position:relative;min-width:2px;transition:width 0.6s}
+.cmp-bar-val{position:absolute;right:6px;top:50%;transform:translateY(-50%);font-size:9px;font-weight:600;color:rgba(0,0,0,0.7)}
+.cmp-change{width:70px;text-align:right;font-size:11px;font-weight:600;flex-shrink:0}
+.stat-row{display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px solid var(--border)}
+.stat-row:last-child{border-bottom:none}
+.stat-label{font-size:12px;color:var(--t2)}
+.stat-value{font-size:12px;font-weight:600;font-family:'JetBrains Mono',monospace}
+.stat-value.good{color:var(--green)}.stat-value.warn{color:var(--orange)}.stat-value.bad{color:var(--red)}
+.chart-wrap{position:relative;padding-left:52px;padding-bottom:4px}
+.chart-wrap .y-axis{position:absolute;left:0;top:0;bottom:24px;display:flex;flex-direction:column;justify-content:space-between;align-items:flex-end;padding-right:6px;width:48px}
+.chart-wrap .y-tick{font-size:11px;color:var(--t2);font-family:'JetBrains Mono',monospace;line-height:1}
+.chart-wrap .y-label{position:absolute;left:0;top:50%;transform:rotate(-90deg) translateX(-50%);transform-origin:0 0;font-size:10px;color:var(--t2);font-family:'JetBrains Mono',monospace;white-space:nowrap;letter-spacing:0.3px}
+.chart-wrap .chart-area{position:relative}
+.chart-wrap .x-labels{display:flex}
+.chart-wrap .gridlines{position:absolute;left:0;right:0;top:0;bottom:0;pointer-events:none;z-index:0}
+.chart-wrap .gridline{position:absolute;left:0;right:0;height:1px;background:rgba(255,255,255,0.06)}
+.mbar{flex:1;border-radius:2px 2px 0 0;min-height:1px;transition:height 0.4s}
+.month-lbl{font-size:11px;color:var(--t2);text-align:center;height:24px;line-height:24px;flex-shrink:0;font-family:'JetBrains Mono',monospace}
+.monthly-stacked{display:flex;align-items:flex-end;gap:3px;height:220px;padding:0;position:relative;z-index:1}
+.month-col{flex:1;display:flex;flex-direction:column;align-items:center;gap:0}
+.month-stack{width:100%;display:flex;flex-direction:column-reverse}
+.month-seg{width:100%;transition:height 0.3s}
+.month-seg:first-child{border-radius:0 0 2px 2px}
+.month-seg:last-child{border-radius:2px 2px 0 0}
+.bar-chart{display:flex;align-items:flex-end;gap:3px;height:220px;padding:0;position:relative;z-index:1}
+.bar-group{flex:1;display:flex;gap:1px;align-items:flex-end;height:100%}
+.bar-group .mbar{min-width:3px}
+.stacked-bar{display:flex;height:20px;border-radius:4px;overflow:hidden;margin:6px 0}
+.stacked-bar .segment{height:100%}
+.bar{height:5px;background:rgba(255,255,255,0.06);border-radius:3px;overflow:hidden;margin-top:6px}
+.bar .fill{height:100%;border-radius:3px;transition:width 0.5s}
+.bar-label{display:flex;justify-content:space-between;font-size:9px;color:var(--t3);margin-bottom:3px}
+.legend-row{display:flex;flex-wrap:wrap;gap:14px;margin-top:10px}
+.legend-item{display:flex;align-items:center;gap:5px;font-size:11px;color:var(--t2)}
+.legend-dot{width:10px;height:10px;border-radius:2px;flex-shrink:0}
+table{width:100%;border-collapse:collapse;font-size:12px}
+th,td{padding:7px 10px;text-align:left;border-bottom:1px solid var(--border)}
+th{font-weight:600;color:var(--t3);font-size:10px;text-transform:uppercase;letter-spacing:0.5px}
+.dot{width:8px;height:8px;border-radius:50%;display:inline-block;margin-right:5px}
+.dot.good{background:var(--green)}.dot.warn{background:var(--orange)}.dot.bad{background:var(--red)}
+.radar-container{display:flex;gap:20px;flex-wrap:wrap;justify-content:center;align-items:flex-start}
+.radar-panel{text-align:center}
+.radar-panel h3{font-size:12px;font-weight:600;color:var(--t2);margin-bottom:8px}
+.radar-legend{display:flex;flex-direction:column;gap:6px;min-width:180px}
+.leg-item{display:flex;align-items:center;gap:8px;padding:5px 8px;border-radius:6px}
+.leg-color{width:8px;height:8px;border-radius:2px;flex-shrink:0}
+.leg-name{flex:1;font-size:11px;color:var(--t2)}
+.leg-score{font-size:12px;font-weight:600;font-family:'JetBrains Mono',monospace}
+
+.std-item{padding:16px;border:1px solid var(--border);border-radius:8px;margin-bottom:10px}
+.std-item.pass{border-left:3px solid var(--green)}
+.std-item.fail{border-left:3px solid var(--red)}
+
+.std-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:6px}
+.std-metric{font-size:14px;font-weight:600}
+.std-standard{font-size:10px;color:var(--t3);font-family:'JetBrains Mono',monospace}
+.std-body{display:flex;align-items:center;gap:16px}
+.std-value{font-size:24px;font-weight:700;font-family:'JetBrains Mono',monospace;min-width:80px}
+.std-bar-wrap{flex:1;display:flex;flex-direction:column;gap:3px}
+.std-bar-track{height:8px;background:rgba(255,255,255,0.06);border-radius:4px;overflow:hidden;position:relative}
+.std-bar-fill{height:100%;border-radius:4px;transition:width 0.6s}
+.std-bar-limit{position:absolute;top:-2px;height:12px;width:2px;background:var(--t1)}
+.std-bar-labels{display:flex;justify-content:space-between;font-size:9px;color:var(--t3)}
+.std-status{font-size:11px;font-weight:600;min-width:70px;text-align:right}
+
+.std-compact{padding:10px 0;border-bottom:1px solid var(--border)}
+.std-compact:last-child{border-bottom:none}
+.print-btn{position:fixed;bottom:20px;right:20px;padding:8px 18px;background:var(--green);color:var(--bg);border:none;border-radius:6px;font-size:11px;font-weight:600;cursor:pointer;font-family:'DM Sans',sans-serif}
+@media print{.tabs,.print-btn{display:none}.section{display:block!important;page-break-inside:avoid}}
+</style>
+</head>
+<body>
+
+<header class="header">
+  <div>
+    <h1><span>GDS</span> Results Comparison</h1>
+    <div class="case-legend">
+      <span><span class="case-dot" style="background:var(--design)"></span>Design Case</span>
+      <span><span class="case-dot" style="background:var(--reference)"></span>Reference Case</span>
+    </div>
+  </div>
+  <div class="meta">
+    <div class="name" id="pName">--</div>
+    <div id="pTime">--</div>
+  </div>
+</header>
+
+<nav class="tabs">
+  <div class="tab active" data-s="overview">Overview</div>
+  <div class="tab" data-s="energy">Energy</div>
+  <div class="tab" data-s="carbon">Carbon &amp; Cost</div>
+  <div class="tab" data-s="hvac">HVAC</div>
+  <div class="tab" data-s="comfort">Comfort</div>
+</nav>
+
+<main class="main">
+
+<!-- ==================== OVERVIEW ==================== -->
+<section id="overview" class="section active">
+  <div class="card" style="margin-bottom:20px">
+    <div class="card-head"><span class="card-title">Performance Polygon — Design vs Reference</span><span class="badge green" id="baselineLabel">Reference = Baseline</span></div>
+    <p style="font-size:11px;color:var(--t2);margin-bottom:16px">Each axis shows a performance metric. The dashed polygon is the reference case (baseline). Outward = improvement relative to reference. Scale: baseline &plusmn;50%.</p>
+    <div style="display:flex;gap:24px;flex-wrap:wrap;justify-content:center;align-items:flex-start">
+      <svg id="polyChart" width="560" height="480"></svg>
+      <div style="flex:1;min-width:280px" id="polyMetrics"></div>
+    </div>
+    <div class="legend-row" style="margin-top:16px;justify-content:center">
+      <span class="legend-item"><span class="legend-dot" style="background:var(--design)"></span>Design Case</span>
+      <span class="legend-item"><span class="legend-dot" style="border:2px dashed var(--reference);background:transparent;width:10px;height:10px"></span>Reference Case (Baseline)</span>
+    </div>
+  </div>
+  <div class="grid-5" id="kpiRow"></div>
+  <div class="card" style="margin-bottom:20px">
+    <div class="card-head"><span class="card-title">Detailed Performance Metrics</span></div>
+    <div id="fullTable"></div>
+  </div>
+  <div class="card" style="margin-bottom:20px">
+    <div class="card-head"><span class="card-title">Performance Metrics Summary</span><span class="badge neutral">Design vs Reference</span></div>
+    <div id="standardsGrid"></div>
+  </div>
+
+</section>
+
+<!-- ==================== ENERGY ==================== -->
+<section id="energy" class="section">
+  <div class="grid-2">
+    <div class="card">
+      <div class="card-head"><span class="card-title">Annual End-Use Energy Comparison</span><span class="badge neutral">MWh by End Use</span></div>
+      <div id="endUseCompare"></div>
+      <div class="legend-row" style="margin-top:14px"><span class="legend-item"><span class="legend-dot" style="background:var(--design)"></span>Design Case</span><span class="legend-item"><span class="legend-dot" style="background:var(--reference)"></span>Reference Case</span></div>
+    </div>
+    <div class="card">
+      <div class="card-head"><span class="card-title">Monthly Total Energy — Design vs Reference</span><span class="badge neutral">kWh/month</span></div>
+      <div class="chart-wrap" id="monthCompareWrap">
+        <div class="y-label">Energy (MWh)</div>
+        <div class="y-axis" id="monthCompareY"></div>
+        <div class="chart-area bar-chart" id="monthCompare"></div>
+      </div>
+      <div class="legend-row"><span class="legend-item"><span class="legend-dot" style="background:var(--design)"></span>Design Case</span><span class="legend-item"><span class="legend-dot" style="background:var(--reference)"></span>Reference Case</span></div>
+    </div>
+  </div>
+  <div class="grid-2">
+    <div class="card">
+      <div class="card-head"><span class="card-title">Design Case — Annual End-Use Breakdown</span><span class="badge green">Design</span></div>
+      <div style="display:flex;justify-content:center"><svg id="pieD" width="180" height="180"></svg></div>
+      <div id="euListD" style="margin-top:12px"></div>
+    </div>
+    <div class="card">
+      <div class="card-head"><span class="card-title">Reference Case — Annual End-Use Breakdown</span><span class="badge blue">Reference</span></div>
+      <div style="display:flex;justify-content:center"><svg id="pieR" width="180" height="180"></svg></div>
+      <div id="euListR" style="margin-top:12px"></div>
+    </div>
+  </div>
+  <div class="grid-2">
+    <div class="card">
+      <div class="card-head"><span class="card-title">Design Case — Energy by Fuel Type</span></div>
+      <div class="stacked-bar" id="fuelBarD"></div>
+      <div class="legend-row" id="fuelLegD"></div>
+      <div style="margin-top:12px">
+        <div class="stat-row"><span class="stat-label">Electricity (MWh)</span><span class="stat-value" id="elecD">--</span></div>
+        <div class="stat-row"><span class="stat-label">Natural Gas (MWh)</span><span class="stat-value" id="gasD">--</span></div>
+        <div class="stat-row"><span class="stat-label">District (MWh)</span><span class="stat-value" id="distD">--</span></div>
+        <div class="stat-row"><span class="stat-label">Total Site Energy (MWh)</span><span class="stat-value" id="totalD">--</span></div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-head"><span class="card-title">Reference Case — Energy by Fuel Type</span></div>
+      <div class="stacked-bar" id="fuelBarR"></div>
+      <div class="legend-row" id="fuelLegR"></div>
+      <div style="margin-top:12px">
+        <div class="stat-row"><span class="stat-label">Electricity (MWh)</span><span class="stat-value" id="elecR">--</span></div>
+        <div class="stat-row"><span class="stat-label">Natural Gas (MWh)</span><span class="stat-value" id="gasR">--</span></div>
+        <div class="stat-row"><span class="stat-label">District (MWh)</span><span class="stat-value" id="distR">--</span></div>
+        <div class="stat-row"><span class="stat-label">Total Site Energy (MWh)</span><span class="stat-value" id="totalR">--</span></div>
+      </div>
+    </div>
+  </div>
+  <div class="grid-2">
+    <div class="card">
+      <div class="card-head"><span class="card-title">Design Case — Monthly End-Use Breakdown</span><span class="badge green">kWh by Category</span></div>
+      <div class="chart-wrap" id="stackedDWrap">
+        <div class="y-label">Energy (MWh)</div>
+        <div class="y-axis" id="stackedDY"></div>
+        <div class="chart-area monthly-stacked" id="stackedD"></div>
+      </div>
+      <div class="legend-row" id="stackedLegD"></div>
+    </div>
+    <div class="card">
+      <div class="card-head"><span class="card-title">Reference Case — Monthly End-Use Breakdown</span><span class="badge blue">kWh by Category</span></div>
+      <div class="chart-wrap" id="stackedRWrap">
+        <div class="y-label">Energy (MWh)</div>
+        <div class="y-axis" id="stackedRY"></div>
+        <div class="chart-area monthly-stacked" id="stackedR"></div>
+      </div>
+      <div class="legend-row" id="stackedLegR"></div>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-head"><span class="card-title">Monthly Heating &amp; Cooling Load Comparison</span><span class="badge neutral">Design vs Reference</span></div>
+    <div class="chart-wrap" id="hcCompareWrap">
+      <div class="y-label">Energy (MWh)</div>
+      <div class="y-axis" id="hcCompareY"></div>
+      <div class="chart-area bar-chart" id="hcCompare"></div>
+    </div>
+    <div class="legend-row">
+      <span class="legend-item"><span class="legend-dot" style="background:var(--orange)"></span>Design Heating</span>
+      <span class="legend-item"><span class="legend-dot" style="background:var(--blue)"></span>Design Cooling</span>
+      <span class="legend-item"><span class="legend-dot" style="background:var(--orange);opacity:0.35"></span>Ref. Heating</span>
+      <span class="legend-item"><span class="legend-dot" style="background:var(--blue);opacity:0.35"></span>Ref. Cooling</span>
+    </div>
+  </div>
+</section>
+
+<!-- ==================== CARBON & COST ==================== -->
+<section id="carbon" class="section">
+  <div class="grid-2">
+    <div class="card">
+      <div class="card-head"><span class="card-title">Annual Carbon Emissions — Design vs Reference</span></div>
+      <div class="grid-2" style="margin:0;gap:20px">
+        <div>
+          <div class="label">Design</div>
+          <div class="metric metric-sm"><span class="val" style="color:var(--design)" id="carbonD">--</span><span class="unit">kg CO2/yr</span></div>
+        </div>
+        <div>
+          <div class="label">Reference</div>
+          <div class="metric metric-sm"><span class="val" style="color:var(--reference)" id="carbonR">--</span><span class="unit">kg CO2/yr</span></div>
+        </div>
+      </div>
+      <div id="carbonCmpBadge" style="margin-top:12px"></div>
+      <div style="margin-top:16px">
+        <div class="stat-row"><span class="stat-label">Design Intensity (kg CO2/m2)</span><span class="stat-value" id="ciD">--</span></div>
+        <div class="stat-row"><span class="stat-label">Reference Intensity (kg CO2/m2)</span><span class="stat-value" id="ciR">--</span></div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-head"><span class="card-title">Annual Energy Cost — Design vs Reference</span></div>
+      <div class="grid-2" style="margin:0;gap:20px">
+        <div>
+          <div class="label">Design</div>
+          <div class="metric metric-sm"><span class="val" style="color:var(--design)" id="costD">--</span><span class="unit">USD/yr</span></div>
+        </div>
+        <div>
+          <div class="label">Reference</div>
+          <div class="metric metric-sm"><span class="val" style="color:var(--reference)" id="costR">--</span><span class="unit">USD/yr</span></div>
+        </div>
+      </div>
+      <div id="savingsBadge" style="margin-top:12px"></div>
+      <div style="margin-top:16px">
+        <div class="stat-row"><span class="stat-label">Design ($/m2)</span><span class="stat-value" id="cpaD">--</span></div>
+        <div class="stat-row"><span class="stat-label">Reference ($/m2)</span><span class="stat-value" id="cpaR">--</span></div>
+      </div>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-head"><span class="card-title">Monthly Energy Cost — Design vs Reference</span><span class="badge neutral">USD/month</span></div>
+    <div class="chart-wrap" id="costCompareWrap">
+      <div class="y-label">Cost (USD)</div>
+      <div class="y-axis" id="costCompareY"></div>
+      <div class="chart-area bar-chart" id="costCompare"></div>
+    </div>
+    <div class="legend-row"><span class="legend-item"><span class="legend-dot" style="background:var(--design)"></span>Design Case</span><span class="legend-item"><span class="legend-dot" style="background:var(--reference)"></span>Reference Case</span></div>
+  </div>
+</section>
+
+<!-- ==================== HVAC ==================== -->
+<section id="hvac" class="section">
+  <div class="grid-2">
+    <div class="card">
+      <div class="card-head"><span class="card-title">Unmet Setpoint Hours — Design Case</span><span class="badge" id="unmetBadgeD">--</span></div>
+      <div class="metric"><span class="val" id="unmetD">--</span><span class="unit">hours</span></div>
+      <div class="bar-label"><span>0</span><span>Threshold: 300 hrs</span></div>
+      <div class="bar"><div class="fill" id="unmetBarD"></div></div>
+      <div style="margin-top:12px">
+        <div class="stat-row"><span class="stat-label">Heating Unmet (hrs)</span><span class="stat-value" id="unmetHD">--</span></div>
+        <div class="stat-row"><span class="stat-label">Cooling Unmet (hrs)</span><span class="stat-value" id="unmetCD">--</span></div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-head"><span class="card-title">Unmet Setpoint Hours — Reference Case</span><span class="badge" id="unmetBadgeR">--</span></div>
+      <div class="metric"><span class="val" id="unmetR">--</span><span class="unit">hours</span></div>
+      <div class="bar-label"><span>0</span><span>Threshold: 300 hrs</span></div>
+      <div class="bar"><div class="fill" id="unmetBarR"></div></div>
+      <div style="margin-top:12px">
+        <div class="stat-row"><span class="stat-label">Heating Unmet (hrs)</span><span class="stat-value" id="unmetHR">--</span></div>
+        <div class="stat-row"><span class="stat-label">Cooling Unmet (hrs)</span><span class="stat-value" id="unmetCR">--</span></div>
+      </div>
+    </div>
+  </div>
+  <div class="grid-2">
+    <div class="card">
+      <div class="card-head"><span class="card-title">HVAC Sizing Adequacy — Design Case</span></div>
+      <div class="stat-row"><span class="stat-label">Heating Capacity (kW)</span><span class="stat-value" id="hCapD">--</span></div>
+      <div class="stat-row"><span class="stat-label">Heating Ratio (cap./peak)</span><span class="stat-value" id="hRatD">--</span></div>
+      <div class="stat-row"><span class="stat-label">Cooling Capacity (kW)</span><span class="stat-value" id="cCapD">--</span></div>
+      <div class="stat-row"><span class="stat-label">Cooling Ratio (cap./peak)</span><span class="stat-value" id="cRatD">--</span></div>
+      <div class="label" style="margin-top:10px;font-size:9px">Ratio = Installed Capacity / Design Peak Load</div>
+    </div>
+    <div class="card">
+      <div class="card-head"><span class="card-title">HVAC Sizing Adequacy — Reference Case</span></div>
+      <div class="stat-row"><span class="stat-label">Heating Capacity (kW)</span><span class="stat-value" id="hCapR">--</span></div>
+      <div class="stat-row"><span class="stat-label">Heating Ratio (cap./peak)</span><span class="stat-value" id="hRatR">--</span></div>
+      <div class="stat-row"><span class="stat-label">Cooling Capacity (kW)</span><span class="stat-value" id="cCapR">--</span></div>
+      <div class="stat-row"><span class="stat-label">Cooling Ratio (cap./peak)</span><span class="stat-value" id="cRatR">--</span></div>
+      <div class="label" style="margin-top:10px;font-size:9px">Ratio = Installed Capacity / Design Peak Load</div>
+    </div>
+  </div>
+</section>
+
+<!-- ==================== COMFORT ==================== -->
+<section id="comfort" class="section">
+  <div class="grid-2">
+    <div class="card">
+      <div class="card-head"><span class="card-title">Zone Thermal Comfort (Fanger PMV/PPD) — Design Case</span><span class="badge green">Avg PPD: <span id="ppdD">--</span>%</span></div>
+      <div style="max-height:400px;overflow-y:auto">
+      <table><thead><tr><th>Zone</th><th>Avg PMV (-)</th><th>Avg PPD (%)</th><th>Comfort%</th><th>Status</th></tr></thead><tbody id="cTableD"></tbody></table>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-head"><span class="card-title">Zone Thermal Comfort (Fanger PMV/PPD) — Reference Case</span><span class="badge blue">Avg PPD: <span id="ppdR">--</span>%</span></div>
+      <div style="max-height:400px;overflow-y:auto">
+      <table><thead><tr><th>Zone</th><th>Avg PMV (-)</th><th>Avg PPD (%)</th><th>Comfort%</th><th>Status</th></tr></thead><tbody id="cTableR"></tbody></table>
+      </div>
+    </div>
+  </div>
+</section>
+
+</main>
+<button class="print-btn" onclick="window.print()">Export</button>
+
+<script>
+const R = RESULTS_PLACEHOLDER;
+const D = R.design, Rf = R.reference, C = R.comparison;
+const M = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+const MS = M.map(m => m[0]);
+const EU_COLORS = {heating:'#f59e0b',cooling:'#3b82f6',lighting:'#fbbf24',equipment:'#a78bfa',fans:'#64748b',dhw:'#22d3ee',ext_lighting:'#fb923c',pumps:'#94a3b8',heat_rejection:'#f472b6',humidification:'#34d399',refrigeration:'#c084fc'};
+const EU_LABELS = {heating:'Heating',cooling:'Cooling',lighting:'Lighting',equipment:'Equipment',fans:'Fans',dhw:'Hot Water',ext_lighting:'Ext Light',pumps:'Pumps',heat_rejection:'Heat Rej.',humidification:'Humid.',refrigeration:'Refrig.'};
+const CATS = ['heating','cooling','lighting','equipment','fans','dhw'];
+const CHART_H = 220;   // total CSS height of chart containers
+const LABEL_H = 24;    // space for month labels at bottom
+const BAR_H = CHART_H - LABEL_H;  // 196px — actual bar drawing area
+
+document.addEventListener('DOMContentLoaded', () => {
+    document.querySelectorAll('.tab').forEach(t => t.addEventListener('click', () => {
+        document.querySelectorAll('.tab').forEach(x => x.classList.remove('active'));
+        document.querySelectorAll('.section').forEach(x => x.classList.remove('active'));
+        t.classList.add('active');
+        document.getElementById(t.dataset.s).classList.add('active');
+    }));
+    document.getElementById('pName').textContent = R.projectName;
+    document.getElementById('pTime').textContent = R.timestamp;
+    [renderOverview, renderEnergy, renderCarbonCost, renderHVAC, renderComfort].forEach(fn => {
+        try { fn(); } catch(e) { console.error(fn.name + ':', e); }
+    });
+});
+
+function renderYAxis(elId, maxVal, unit, nTicks) {
+    nTicks = nTicks || 5;
+    const el = document.getElementById(elId);
+    const step = niceStep(maxVal, nTicks);
+    const niceMax = Math.ceil(maxVal / step) * step;
+    if (!el) return niceMax;
+    let html = '';
+    for (let i = nTicks; i >= 0; i--) {
+        const v = (niceMax / nTicks) * i;
+        let label;
+        if (unit === 'MWh') label = (v/1000).toFixed(v >= 10000 ? 0 : 1);
+        else if (unit === 'USD') label = '$' + Math.round(v).toLocaleString();
+        else label = v.toFixed(0);
+        html += '<span class="y-tick">' + label + '</span>';
+    }
+    el.innerHTML = html;
+    return niceMax;
+}
+function addGridlines(chartAreaId, nTicks) {
+    nTicks = nTicks || 5;
+    const ca = document.getElementById(chartAreaId);
+    if (!ca) return;
+    ca.style.position = 'relative';
+    let gl = ca.querySelector('.gridlines');
+    if (gl) gl.remove();
+    gl = document.createElement('div');
+    gl.className = 'gridlines';
+    gl.style.cssText = 'position:absolute;left:0;right:0;top:0;bottom:'+LABEL_H+'px;pointer-events:none;z-index:0';
+    let h = '';
+    for (let i = 0; i <= nTicks; i++) h += '<div class="gridline" style="top:'+(i/nTicks*100)+'%"></div>';
+    gl.innerHTML = h;
+    ca.insertBefore(gl, ca.firstChild);
+}
+function niceStep(max, nTicks) {
+    if (max <= 0) return 1;
+    const rough = max / nTicks;
+    const mag = Math.pow(10, Math.floor(Math.log10(rough)));
+    const norm = rough / mag;
+    let nice;
+    if (norm <= 1.5) nice = 1;
+    else if (norm <= 3) nice = 2;
+    else if (norm <= 7) nice = 5;
+    else nice = 10;
+    return nice * mag || 1;
+}
+function getNiceMax(maxVal, nTicks) {
+    nTicks = nTicks || 5;
+    if (maxVal <= 0) return 1;
+    const step = niceStep(maxVal, nTicks);
+    return Math.ceil(maxVal / step) * step;
+}
+
+const CATS_STACKED = ['equipment','lighting','fans','dhw','cooling','heating'];
+
+/* ============ OVERVIEW TAB ============ */
+function renderOverview() {
+    renderPolygon();
+    const kpis = [
+        {label:'Site EUI',val:C.siteEUI.design,unit:'kWh/m2',pct:C.siteEUI.pct,imp:C.siteEUI.improved},
+        {label:'Annual Savings',val:C.annualSavings,unit:'',pct:null,imp:C.annualSavings>=0,fmt:v=>(v>=0?'+':'-')+'$'+Math.abs(v).toLocaleString()},
+        {label:'Carbon',val:C.carbon.design,unit:'kg CO2',pct:C.carbon.pct,imp:C.carbon.improved,fmt:v=>v.toLocaleString()},
+        {label:'Comfort (PPD)',val:C.ppd.design,unit:'%',pct:C.ppd.pct,imp:C.ppd.improved},
+        {label:'Unmet Hours',val:C.unmetHours.design,unit:'hrs',pct:C.unmetHours.pct,imp:C.unmetHours.improved}
+    ];
+    document.getElementById('kpiRow').innerHTML = kpis.map(k => {
+        const cls = k.imp ? 'pos' : 'neg';
+        const arrow = k.imp ? '\\u2193' : '\\u2191';
+        const valStr = k.fmt ? k.fmt(k.val) : k.val.toFixed(1);
+        const chgStr = k.pct !== null ? (arrow + ' ' + Math.abs(k.pct).toFixed(1) + '%') : '';
+        return '<div class="card kpi"><div class="val">' + valStr + '</div><div class="lbl">' + k.label + (k.unit ? ' (' + k.unit + ')' : '') + '</div>' + (chgStr ? '<div class="change ' + cls + '">' + chgStr + ' vs ref</div>' : '') + '</div>';
+    }).join('');
+
+    const metrics = [
+        ['Site EUI (kWh/m2/yr)','siteEUI','f1'],['Source EUI (kWh/m2/yr)','sourceEUI','f1'],
+        ['Total Energy (kWh)','totalSiteEnergy','comma'],['Electricity (kWh)','totalElectricity','comma'],
+        ['Natural Gas (kWh)','totalGas','comma'],['District (kWh)','totalDistrict','comma'],['Heating (kWh)','heating','comma'],
+        ['Cooling (kWh)','cooling','comma'],['Lighting (kWh)','lighting','comma'],
+        ['Equipment (kWh)','equipment','comma'],['Carbon (kg CO2)','carbon','comma'],
+        ['Carbon Intensity (kg/m2)','carbonIntensity','f1'],['Annual Cost ($)','cost','comma'],
+        ['Comfort (PPD %)','ppd','f1'],['Unmet Hours','unmetHours','f1'],
+        ['Peak Heating (kW)','peakHeating','f1'],['Peak Cooling (kW)','peakCooling','f1']
+    ];
+    function fmtVal(v,f){if(f==='comma')return Math.round(v).toLocaleString();if(f==='f1')return v.toFixed(1);return v}
+    document.getElementById('fullTable').innerHTML = '<table><thead><tr><th>Metric</th><th>Design</th><th>Reference</th><th>Delta vs Baseline</th></tr></thead><tbody>' +
+        metrics.map(([label,key,fmt]) => {
+            const m = C[key]; if(!m) return '';
+            const cls = m.improved ? 'good' : 'bad';
+            const arrow = m.improved ? '\\u2193' : '\\u2191';
+            return '<tr><td>'+label+'</td><td>'+fmtVal(m.design,fmt)+'</td><td>'+fmtVal(m.reference,fmt)+'</td><td class="stat-value '+cls+'">'+arrow+' '+Math.abs(m.pct).toFixed(1)+'%</td></tr>';
+        }).join('') + '</tbody></table>';
+
+    const dp = D.performance || {};
+    const stdItems = [
+        {metric:'Thermal Comfort (PPD)', note:'PPD < 10% ~ PMV within \u00b10.5', dVal:C.ppd.design, limit:20, unit:'%',
+         type:'threshold', connected: dp.thermalComfort?.connected || false},
+        {metric:'Unmet Setpoint Hours', note:'Common modeling threshold', dVal:C.unmetHours.design, rVal:C.unmetHours.reference, limit:300, unit:'hours',
+         type:'threshold', connected: true},
+
+    ];
+    document.getElementById('standardsGrid').innerHTML = stdItems.map(item => {
+        if (item.type === 'threshold') {
+            const dOk = item.dVal <= item.limit;
+            const dColor = dOk ? 'var(--green)' : 'var(--red)';
+            const dBarW = Math.min(100, item.dVal / item.limit * 100);
+            let detail = '';
+            if (item.rVal !== undefined) {
+                const rOk = item.rVal <= item.limit;
+                const rBarW = Math.min(100, item.rVal / item.limit * 100);
+                detail = '<div class="std-body" style="margin-top:6px"><span class="std-value" style="color:'+(rOk?'var(--blue)':'var(--red)')+';font-size:18px">'+item.rVal.toFixed(1)+'</span><div class="std-bar-wrap"><div class="std-bar-labels"><span>Reference</span><span></span></div><div class="std-bar-track"><div class="std-bar-fill" style="width:'+rBarW+'%;background:'+(rOk?'var(--reference)':'var(--red)')+'"></div></div></div><span class="std-status" style="color:'+(rOk?'var(--blue)':'var(--red)')+';font-size:11px">'+(rOk?'\\u2713 Within threshold':'\\u2717 Exceeds threshold')+'</span></div>';
+            }
+            return '<div class="std-item '+(dOk?'pass':'fail')+'"><div class="std-header"><span class="std-metric">'+item.metric+'</span><span class="std-standard" style="font-size:10px;color:var(--t3)">'+item.note+'</span></div><div class="std-body"><span class="std-value" style="color:'+dColor+'">'+item.dVal.toFixed(1)+'</span><div class="std-bar-wrap"><div class="std-bar-labels"><span>Design</span><span>Threshold: '+item.limit+' '+item.unit+'</span></div><div class="std-bar-track"><div class="std-bar-fill" style="width:'+dBarW+'%;background:'+dColor+'"></div></div></div><span class="std-status" style="color:'+dColor+'">'+(dOk?'\\u2713 Within threshold':'\\u2717 Exceeds threshold')+'</span></div>'+detail+'</div>';
+        }
+        return '';
+    }).join('');
+
+}
+
+/* ============ POLYGON CHART ============ */
+function renderPolygon() {
+    const dp = D.performance || {};
+    const axes = [
+        {key:'eui', label:'Site EUI', unit:'kWh/m2/yr',
+         dVal: C.siteEUI.design, rVal: C.siteEUI.reference, lowerBetter: true},
+        {key:'sourceEui', label:'Source EUI', unit:'kWh/m2/yr',
+         dVal: C.sourceEUI.design, rVal: C.sourceEUI.reference, lowerBetter: true},
+        {key:'cost', label:'Energy Cost', unit:'$/yr',
+         dVal: C.cost.design, rVal: C.cost.reference, lowerBetter: true},
+        {key:'carbon', label:'Carbon', unit:'kg CO2/m2',
+         dVal: C.carbonIntensity.design, rVal: C.carbonIntensity.reference, lowerBetter: true},
+        {key:'comfort', label:'Comfort (PPD)', unit:'%',
+         dVal: C.ppd.design, rVal: C.ppd.reference, lowerBetter: true,
+         connected: dp.thermalComfort?.connected},
+        {key:'unmet', label:'Unmet Hours', unit:'hrs',
+         dVal: C.unmetHours.design, rVal: C.unmetHours.reference, lowerBetter: true},
+        {key:'heating', label:'Heating Load', unit:'kWh',
+         dVal: C.heating.design, rVal: C.heating.reference, lowerBetter: true},
+        {key:'cooling', label:'Cooling Load', unit:'kWh',
+         dVal: C.cooling.design, rVal: C.cooling.reference, lowerBetter: true},
+        {key:'peakHeat', label:'Peak Heating', unit:'kW',
+         dVal: C.peakHeating.design, rVal: C.peakHeating.reference, lowerBetter: true},
+        {key:'peakCool', label:'Peak Cooling', unit:'kW',
+         dVal: C.peakCooling.design, rVal: C.peakCooling.reference, lowerBetter: true}
+    ].filter(a => a.connected !== false && a.rVal > 0);
+
+    const n = axes.length;
+    const svg = document.getElementById('polyChart');
+    const cx = 280, cy = 240, maxR = 155, baseR = maxR * 0.55;
+    const minR = maxR * 0.1;
+    svg.innerHTML = '';
+
+    axes.forEach(a => {
+        if (a.rVal === 0) { a.normR = baseR; a.improvePct = 0; return; }
+        const rawImprove = a.lowerBetter ? (a.rVal - a.dVal) / a.rVal : (a.dVal - a.rVal) / a.rVal;
+        a.improvePct = rawImprove * 100;
+        const clamped = Math.max(-0.5, Math.min(0.5, rawImprove));
+        a.normR = baseR + (clamped / 0.5) * (maxR - baseR);
+        if (a.normR < minR) a.normR = minR;
+    });
+
+    [{r:maxR*0.1,l:''},{r:maxR*0.325,l:'-25%'},{r:baseR,l:'Baseline'},{r:maxR*0.775,l:'+25%'},{r:maxR,l:'+50%'}].forEach(ring => {
+        const c = document.createElementNS('http://www.w3.org/2000/svg','circle');
+        c.setAttribute('cx',cx); c.setAttribute('cy',cy); c.setAttribute('r',ring.r);
+        c.setAttribute('fill','none');
+        c.setAttribute('stroke', ring.l==='Baseline' ? 'rgba(96,165,250,0.4)' : 'rgba(255,255,255,0.06)');
+        c.setAttribute('stroke-width', ring.l==='Baseline' ? '2' : '1');
+        if (ring.l==='Baseline') c.setAttribute('stroke-dasharray','6,4');
+        svg.appendChild(c);
+        if (ring.l && ring.l !== 'Baseline') {
+            const t = document.createElementNS('http://www.w3.org/2000/svg','text');
+            t.setAttribute('x', cx + ring.r + 2); t.setAttribute('y', cy - 2);
+            t.setAttribute('font-size','8'); t.setAttribute('fill','rgba(255,255,255,0.2)');
+            t.textContent = ring.l; svg.appendChild(t);
+        }
+    });
+
+    axes.forEach((a, i) => {
+        const angle = -Math.PI/2 + i * (2*Math.PI/n);
+        const line = document.createElementNS('http://www.w3.org/2000/svg','line');
+        line.setAttribute('x1',cx); line.setAttribute('y1',cy);
+        line.setAttribute('x2', cx + maxR * Math.cos(angle));
+        line.setAttribute('y2', cy + maxR * Math.sin(angle));
+        line.setAttribute('stroke','rgba(255,255,255,0.1)'); svg.appendChild(line);
+        const lx = cx + (maxR + 20) * Math.cos(angle);
+        const ly = cy + (maxR + 20) * Math.sin(angle);
+        const txt = document.createElementNS('http://www.w3.org/2000/svg','text');
+        txt.setAttribute('x', lx); txt.setAttribute('y', ly + (Math.sin(angle) > 0.3 ? 12 : Math.sin(angle) < -0.3 ? -4 : 4));
+        txt.setAttribute('text-anchor', Math.abs(Math.cos(angle)) < 0.3 ? 'middle' : Math.cos(angle) > 0 ? 'start' : 'end');
+        txt.setAttribute('font-size','10'); txt.setAttribute('fill','#8b95a8');
+        txt.setAttribute('font-family','DM Sans, sans-serif');
+        txt.textContent = a.label; svg.appendChild(txt);
+    });
+
+    const refPts = axes.map((a,i) => {
+        const angle = -Math.PI/2 + i*(2*Math.PI/n);
+        return {x: cx+baseR*Math.cos(angle), y: cy+baseR*Math.sin(angle)};
+    });
+    const refPoly = document.createElementNS('http://www.w3.org/2000/svg','polygon');
+    refPoly.setAttribute('points', refPts.map(p=>p.x+','+p.y).join(' '));
+    refPoly.setAttribute('fill','rgba(96,165,250,0.06)');
+    refPoly.setAttribute('stroke','#60a5fa'); refPoly.setAttribute('stroke-width','1.5');
+    refPoly.setAttribute('stroke-dasharray','6,3'); svg.appendChild(refPoly);
+
+    const desPts = axes.map((a,i) => {
+        const angle = -Math.PI/2 + i*(2*Math.PI/n);
+        return {x: cx+a.normR*Math.cos(angle), y: cy+a.normR*Math.sin(angle)};
+    });
+    const desPoly = document.createElementNS('http://www.w3.org/2000/svg','polygon');
+    desPoly.setAttribute('points', desPts.map(p=>p.x+','+p.y).join(' '));
+    desPoly.setAttribute('fill','rgba(74,222,128,0.12)');
+    desPoly.setAttribute('stroke','#4ade80'); desPoly.setAttribute('stroke-width','2.5');
+    svg.appendChild(desPoly);
+
+    desPts.forEach((p, i) => {
+        const dot = document.createElementNS('http://www.w3.org/2000/svg','circle');
+        dot.setAttribute('cx',p.x); dot.setAttribute('cy',p.y); dot.setAttribute('r','4');
+        dot.setAttribute('fill', axes[i].improvePct >= 0 ? '#4ade80' : '#f87171');
+        dot.setAttribute('stroke','#fff'); dot.setAttribute('stroke-width','1.5');
+        svg.appendChild(dot);
+        const vt = document.createElementNS('http://www.w3.org/2000/svg','text');
+        const angle = -Math.PI/2 + i*(2*Math.PI/n);
+        const off = axes[i].normR > baseR ? 14 : -14;
+        vt.setAttribute('x', p.x + off*Math.cos(angle)); vt.setAttribute('y', p.y + off*Math.sin(angle)+3);
+        vt.setAttribute('text-anchor','middle'); vt.setAttribute('font-size','9'); vt.setAttribute('font-weight','600');
+        vt.setAttribute('fill', axes[i].improvePct >= 0 ? '#4ade80' : '#f87171');
+        vt.setAttribute('font-family','JetBrains Mono, monospace');
+        vt.textContent = (axes[i].improvePct >= 0 ? '\\u2193':'\\u2191') + Math.abs(axes[i].improvePct).toFixed(1)+'%';
+        svg.appendChild(vt);
+    });
+
+    document.getElementById('polyMetrics').innerHTML =
+        '<table style="font-size:12px"><thead><tr><th>Metric</th><th>Design</th><th>Ref.</th><th>Delta</th><th>Standard</th></tr></thead><tbody>' +
+        axes.map(a => {
+            const imp = a.improvePct;
+            const cls = imp >= 0 ? 'good' : 'bad';
+            const arrow = imp >= 0 ? '\\u2193' : '\\u2191';
+            const fmt = v => typeof v === 'number' ? (v >= 1000 ? Math.round(v).toLocaleString() : v.toFixed(1)) : '--';
+            return '<tr><td>'+a.label+' <span style="color:var(--t3)">('+a.unit+')</span></td><td style="font-family:JetBrains Mono,monospace;font-weight:500">'+fmt(a.dVal)+'</td><td style="font-family:JetBrains Mono,monospace;color:var(--t3)">'+fmt(a.rVal)+'</td><td class="stat-value '+cls+'">'+arrow+' '+Math.abs(imp).toFixed(1)+'%</td><td style="color:var(--t3);font-size:10px">'+a.standard+'</td></tr>';
+        }).join('') + '</tbody></table>';
+}
+
+/* ============ ENERGY TAB ============ */
+function renderEnergy() {
+    const endUses = ['heating','cooling','lighting','equipment','fans','dhw'];
+    const de = D.energy.endUses || {}, re = Rf.energy.endUses || {};
+    const maxEU = Math.max(...endUses.map(k => Math.max(de[k]||0, re[k]||0)), 1);
+    document.getElementById('endUseCompare').innerHTML = endUses.map(k => {
+        const dv = de[k]||0, rv = re[k]||0;
+        const dp = dv/maxEU*100, rp = rv/maxEU*100;
+        const diff = rv > 0 ? ((dv-rv)/rv*100) : 0;
+        const cls = diff < 0 ? 'pos' : 'neg';
+        return '<div class="cmp-row"><div class="cmp-label">'+(EU_LABELS[k]||k)+'</div><div class="cmp-bars"><div class="cmp-bar" style="width:'+dp+'%;background:var(--design)"><span class="cmp-bar-val">'+(dv/1000).toFixed(0)+'</span></div><div class="cmp-bar" style="width:'+rp+'%;background:var(--reference)"><span class="cmp-bar-val">'+(rv/1000).toFixed(0)+'</span></div></div><div class="cmp-change '+cls+'">'+(diff<0?'\\u2193':'\\u2191')+Math.abs(diff).toFixed(0)+'%</div></div>';
+    }).join('');
+
+    let dmt = D.energy.monthlyTotal || [];
+    let rmt = Rf.energy.monthlyTotal || [];
+    if (dmt.length === 0 || dmt.reduce((a,b)=>a+b,0) === 0) {
+        const me = D.energy.monthlyElec || [], mg = D.energy.monthlyGas || [];
+        if (me.length === 12) dmt = me.map((e,i) => e + (mg[i]||0));
+    }
+    if (rmt.length === 0 || rmt.reduce((a,b)=>a+b,0) === 0) {
+        const me = Rf.energy.monthlyElec || [], mg = Rf.energy.monthlyGas || [];
+        if (me.length === 12) rmt = me.map((e,i) => e + (mg[i]||0));
+    }
+    const mxM = Math.max(...dmt, ...rmt, 1);
+    const mcCeil = renderYAxis('monthCompareY', mxM, 'MWh', 5);
+    let mcHtml = '';
+    for (let i = 0; i < 12; i++) {
+        const dPx = Math.round((dmt[i]||0)/mcCeil*BAR_H);
+        const rPx = Math.round((rmt[i]||0)/mcCeil*BAR_H);
+        mcHtml += '<div class="month-col"><div class="bar-group">' +
+            '<div class="mbar" style="height:'+dPx+'px;background:var(--design)"></div>' +
+            '<div class="mbar" style="height:'+rPx+'px;background:var(--reference)"></div>' +
+            '</div><span class="month-lbl">'+M[i]+'</span></div>';
+    }
+    document.getElementById('monthCompare').innerHTML = mcHtml;
+    addGridlines('monthCompare');
+
+    renderPieAndList(D.energy, 'pieD', 'euListD');
+    renderPieAndList(Rf.energy, 'pieR', 'euListR');
+    renderFuel(D.energy, 'fuelBarD', 'fuelLegD', 'elecD', 'gasD', 'distD', 'totalD');
+    renderFuel(Rf.energy, 'fuelBarR', 'fuelLegR', 'elecR', 'gasR', 'distR', 'totalR');
+    renderStacked(D.energy.monthlyByCategory||{}, 'stackedD', 'stackedLegD', 'stackedDY');
+    renderStacked(Rf.energy.monthlyByCategory||{}, 'stackedR', 'stackedLegR', 'stackedRY');
+
+    const dh = D.energy.monthly?.heating || D.energy.monthlyByCategory?.heating || [];
+    const dc = D.energy.monthly?.cooling || D.energy.monthlyByCategory?.cooling || [];
+    const rh = Rf.energy.monthly?.heating || Rf.energy.monthlyByCategory?.heating || [];
+    const rc = Rf.energy.monthly?.cooling || Rf.energy.monthlyByCategory?.cooling || [];
+    const hcMax = Math.max(...dh, ...dc, ...rh, ...rc, 1);
+    const hcCeil = renderYAxis('hcCompareY', hcMax, 'MWh', 5);
+    let hcHtml = '';
+    for (let i = 0; i < 12; i++) {
+        const dhPx = Math.round((dh[i]||0)/hcCeil*BAR_H);
+        const dcPx = Math.round((dc[i]||0)/hcCeil*BAR_H);
+        const rhPx = Math.round((rh[i]||0)/hcCeil*BAR_H);
+        const rcPx = Math.round((rc[i]||0)/hcCeil*BAR_H);
+        hcHtml += '<div class="month-col"><div class="bar-group">'+
+            '<div class="mbar" style="height:'+dhPx+'px;background:var(--orange)"></div>'+
+            '<div class="mbar" style="height:'+dcPx+'px;background:var(--blue)"></div>'+
+            '<div class="mbar" style="height:'+rhPx+'px;background:var(--orange);opacity:0.35"></div>'+
+            '<div class="mbar" style="height:'+rcPx+'px;background:var(--blue);opacity:0.35"></div>'+
+            '</div><span class="month-lbl">'+M[i]+'</span></div>';
+    }
+    document.getElementById('hcCompare').innerHTML = hcHtml;
+    addGridlines('hcCompare');
+}
+
+function renderPieAndList(e, pieId, listId) {
+    if(!e.endUses) return;
+    const total = Object.values(e.endUses).reduce((a,b)=>a+b,0);
+    const svg = document.getElementById(pieId);
+    svg.innerHTML = '';
+    let angle = -Math.PI/2;
+    Object.entries(e.endUses).forEach(([k,v])=>{
+        if(v<=0) return;
+        const pct=v/total;
+        const end=angle+pct*2*Math.PI;
+        const x1=90+70*Math.cos(angle),y1=90+70*Math.sin(angle);
+        const x2=90+70*Math.cos(end),y2=90+70*Math.sin(end);
+        const path=document.createElementNS('http://www.w3.org/2000/svg','path');
+        path.setAttribute('d','M 90 90 L '+x1+' '+y1+' A 70 70 0 '+(pct>0.5?1:0)+' 1 '+x2+' '+y2+' Z');
+        path.setAttribute('fill',EU_COLORS[k]||'#666');
+        path.setAttribute('stroke','#0c1220');path.setAttribute('stroke-width','2');
+        svg.appendChild(path);
+        angle=end;
+    });
+    document.getElementById(listId).innerHTML = Object.entries(e.endUses)
+        .filter(([k,v])=>v>0).sort((a,b)=>b[1]-a[1])
+        .map(([k,v])=>'<div class="stat-row"><span class="stat-label"><span class="legend-dot" style="background:'+(EU_COLORS[k]||'#666')+';display:inline-block;margin-right:6px"></span>'+(EU_LABELS[k]||k)+'</span><span class="stat-value">'+(v/1000).toFixed(1)+' MWh ('+(v/total*100).toFixed(0)+'%)</span></div>').join('');
+}
+
+function renderFuel(e, barId, legId, elId, gasId, distId, totId) {
+    const fb = e.fuelBreakdown||{};
+    const ep = fb.electricity?.percentage||0, gp = fb.naturalGas?.percentage||0, dp = fb.district?.percentage||0;
+    let barHtml = '<div class="segment" style="width:'+ep+'%;background:var(--orange)"></div>';
+    if (gp > 0) barHtml += '<div class="segment" style="width:'+gp+'%;background:var(--purple)"></div>';
+    if (dp > 0) barHtml += '<div class="segment" style="width:'+dp+'%;background:#22d3ee"></div>';
+    document.getElementById(barId).innerHTML = barHtml;
+    let legHtml = '<span class="legend-item"><span class="legend-dot" style="background:var(--orange)"></span>Elec '+ep+'%</span>';
+    if (gp > 0) legHtml += '<span class="legend-item"><span class="legend-dot" style="background:var(--purple)"></span>Gas '+gp+'%</span>';
+    if (dp > 0) legHtml += '<span class="legend-item"><span class="legend-dot" style="background:#22d3ee"></span>District '+dp+'%</span>';
+    document.getElementById(legId).innerHTML = legHtml;
+    document.getElementById(elId).textContent = (e.totalElectricity/1000).toFixed(1);
+    document.getElementById(gasId).textContent = (e.totalGas/1000).toFixed(1);
+    document.getElementById(distId).textContent = (e.totalDistrict/1000).toFixed(1);
+    document.getElementById(totId).textContent = (e.totalSiteEnergy/1000).toFixed(1);
+}
+
+function renderStacked(mbc, chartId, legId, yAxisId) {
+    const cats = CATS_STACKED;
+    let maxT=0;
+    for(let i=0;i<12;i++){let t=0;cats.forEach(c=>{t+=(mbc[c]?.[i]||0)});maxT=Math.max(maxT,t)}
+    const ceil = yAxisId ? renderYAxis(yAxisId, maxT, 'MWh', 5) : (getNiceMax(maxT, 5));
+    document.getElementById(chartId).innerHTML = M.map((m,i)=>{
+        let segs='';
+        cats.forEach(c=>{
+            const v=mbc[c]?.[i]||0;
+            const h=ceil>0?(v/ceil*BAR_H):0;
+            if(h>0.5)segs+='<div class="month-seg" style="height:'+h.toFixed(1)+'px;background:'+(EU_COLORS[c]||'#666')+'"></div>';
+        });
+        return '<div class="month-col"><div class="month-stack">'+segs+'</div><span class="month-lbl">'+m+'</span></div>';
+    }).join('');
+    addGridlines(chartId);
+    document.getElementById(legId).innerHTML = cats.slice().reverse().map(c=>'<span class="legend-item"><span class="legend-dot" style="background:'+(EU_COLORS[c]||'#666')+'"></span>'+(EU_LABELS[c]||c)+'</span>').join('');
+}
+
+/* ============ CARBON & COST TAB ============ */
+function renderCarbonCost() {
+    const dc=D.energy.carbon||{}, rc=Rf.energy.carbon||{};
+    const dco=D.energy.cost||{}, rco=Rf.energy.cost||{};
+    document.getElementById('carbonD').textContent = (dc.total||0).toLocaleString();
+    document.getElementById('carbonR').textContent = (rc.total||0).toLocaleString();
+    document.getElementById('ciD').textContent = (dc.intensity||0).toFixed(1);
+    document.getElementById('ciR').textContent = (rc.intensity||0).toFixed(1);
+    const cImp = C.carbon.improved;
+    document.getElementById('carbonCmpBadge').innerHTML = '<span class="cmp '+(cImp?'pos':'neg')+'">'+(cImp?'\\u2193':'\\u2191')+' '+Math.abs(C.carbon.pct).toFixed(1)+'% vs reference</span>';
+    document.getElementById('costD').textContent = '$'+(dco.total||0).toLocaleString();
+    document.getElementById('costR').textContent = '$'+(rco.total||0).toLocaleString();
+    document.getElementById('cpaD').textContent = (dco.perArea||0).toFixed(2);
+    document.getElementById('cpaR').textContent = (rco.perArea||0).toFixed(2);
+    const sav = C.annualSavings;
+    document.getElementById('savingsBadge').innerHTML = '<span class="cmp '+(sav>=0?'pos':'neg')+'">'+(sav>=0?'Savings: +$':'Extra cost: -$')+Math.abs(sav).toLocaleString()+'/yr</span>';
+
+    const dmc=D.energy.monthlyCost?.total||[], rmc=Rf.energy.monthlyCost?.total||[];
+    const mxC=Math.max(...dmc,...rmc,1);
+    const costCeil = renderYAxis('costCompareY', mxC, 'USD', 5);
+    let costHtml = '';
+    for (let i = 0; i < 12; i++) {
+        const dPx = Math.round((dmc[i]||0)/costCeil*BAR_H);
+        const rPx = Math.round((rmc[i]||0)/costCeil*BAR_H);
+        costHtml += '<div class="month-col"><div class="bar-group">' +
+            '<div class="mbar" style="height:'+dPx+'px;background:var(--design)"></div>' +
+            '<div class="mbar" style="height:'+rPx+'px;background:var(--reference)"></div>' +
+            '</div><span class="month-lbl">' + M[i] + '</span></div>';
+    }
+    document.getElementById('costCompare').innerHTML = costHtml;
+    addGridlines('costCompare');
+}
+
+/* ============ HVAC TAB ============ */
+function renderHVAC() {
+    renderUnmet(D.energy, 'unmetD', 'unmetBarD', 'unmetBadgeD', 'unmetHD', 'unmetCD');
+    renderUnmet(Rf.energy, 'unmetR', 'unmetBarR', 'unmetBadgeR', 'unmetHR', 'unmetCR');
+    renderSizing(D.energy.hvacSizing||{}, 'hCapD', 'hRatD', 'cCapD', 'cRatD');
+    renderSizing(Rf.energy.hvacSizing||{}, 'hCapR', 'hRatR', 'cCapR', 'cRatR');
+}
+
+function renderUnmet(e, totalId, barId, badgeId, hId, cId) {
+    const u = e.unmetHours||{};
+    document.getElementById(totalId).textContent = (u.total||0).toFixed(0);
+    const pct = Math.min(100,(u.total||0)/300*100);
+    const el = document.getElementById(barId);
+    el.style.width = pct+'%';
+    el.style.background = u.compliant ? 'var(--green)' : 'var(--red)';
+    const bg = document.getElementById(badgeId);
+    bg.textContent = u.compliant ? 'Within Threshold' : 'Exceeds Threshold';
+    bg.className = 'badge '+(u.compliant?'green':'red');
+    document.getElementById(hId).textContent = (u.heating||0).toFixed(0);
+    document.getElementById(cId).textContent = (u.cooling||0).toFixed(0);
+}
+
+function renderSizing(h, hCapId, hRatId, cCapId, cRatId) {
+    document.getElementById(hCapId).textContent = (h.totalHeatingCapacity||0).toFixed(1);
+    document.getElementById(cCapId).textContent = (h.totalCoolingCapacity||0).toFixed(1);
+    const hr=h.heatingRatio||0, cr=h.coolingRatio||0;
+    const hEl=document.getElementById(hRatId), cEl=document.getElementById(cRatId);
+    hEl.textContent = hr.toFixed(2);
+    hEl.className = 'stat-value '+(hr>1.3?'warn':hr<1.0?'bad':'good');
+    cEl.textContent = cr.toFixed(2);
+    cEl.className = 'stat-value '+(cr>1.3?'warn':cr<1.0?'bad':'good');
+}
+
+/* ============ COMFORT TAB ============ */
+function renderComfort() {
+    renderComfortTable(D.comfort, 'cTableD', 'ppdD');
+    renderComfortTable(Rf.comfort, 'cTableR', 'ppdR');
+}
+
+function renderComfortTable(c, tableId, ppdId) {
+    document.getElementById(ppdId).textContent = (c?.avgPPD||0).toFixed(1);
+    const tb = document.getElementById(tableId);
+    if(c?.zones?.length){
+        tb.innerHTML = c.zones.map(z=>{
+            const st = z.ppd<=10?'good':z.ppd<=15?'warn':'bad';
+            return '<tr><td>'+z.name+'</td><td>'+z.pmv.toFixed(2)+'</td><td>'+z.ppd.toFixed(1)+'%</td><td>'+(z.comfortPct||'--')+'%</td><td><span class="dot '+st+'"></span>'+(st==='good'?'OK':st==='warn'?'Marginal':'Poor')+'</td></tr>';
+        }).join('');
+    } else {
+        tb.innerHTML = '<tr><td colspan="5" style="color:var(--t3)">No comfort data</td></tr>';
+    }
+}
+</script>
+</body>
+</html>'''
+
+# --- GRASSHOPPER COMPONENT ENTRY POINT ---
+
+# --- Default input handling (Syracuse, NY — see docstring for citations) ---
+if '_project_name' not in dir() or not _project_name:
+    _project_name = "GDS Project"
+if '_elec_carbon' not in dir() or not _elec_carbon:
+    _elec_carbon = 0.125   # [1] EPA eGRID2022, NYUP subregion
+if '_gas_carbon' not in dir() or not _gas_carbon:
+    _gas_carbon = 0.181    # [2] EPA 40 CFR 98, Table C-1
+if '_elec_rate' not in dir() or not _elec_rate:
+    _elec_rate = 0.166     # [3] EIA, Syracuse NY avg residential
+if '_gas_rate' not in dir() or not _gas_rate:
+    _gas_rate = 0.04       # [4] EIA, NY residential natural gas
+if '_auto_open' not in dir() or _auto_open is None:
+    _auto_open = True
+if '_run' not in dir():
+    _run = False
+
+# --- Outputs ---
+html_path = None
+report = None
+monthly_design_total = None
+monthly_design_elec = None
+monthly_design_gas = None
+monthly_design_district = None
+monthly_ref_total = None
+monthly_ref_elec = None
+monthly_ref_gas = None
+monthly_ref_district = None
+
+if _run:
+    # Validate inputs
+    if not _design_sql or not os.path.exists(str(_design_sql)):
+        raise ValueError("Design SQL not found: {}".format(_design_sql))
+    if not _ref_sql or not os.path.exists(str(_ref_sql)):
+        raise ValueError("Reference SQL not found: {}".format(_ref_sql))
+
+    design_sql = str(_design_sql)
+    ref_sql = str(_ref_sql)
+
+    # Diagnostic: print paths and file info
+    print("=" * 60)
+    print("GDS EPHTML DIAGNOSTIC")
+    print("=" * 60)
+    print("Rates: elec_carbon={}, gas_carbon={}, elec_rate={}, gas_rate={}".format(
+        _elec_carbon, _gas_carbon, _elec_rate, _gas_rate))
+    for label, path in [("Design SQL", design_sql), ("Reference SQL", ref_sql)]:
+        print("{}: {}".format(label, path))
+        if os.path.exists(path):
+            sz = os.path.getsize(path)
+            import time as _t
+            mt = os.path.getmtime(path)
+            print("  Size: {} bytes ({:.1f} MB), Modified: {}".format(
+                sz, sz/1e6, _t.strftime('%Y-%m-%d %H:%M:%S', _t.localtime(mt))))
+        else:
+            print("  *** FILE DOES NOT EXIST ***")
+    print("=" * 60)
+
+    # [1/4] Parse design case
+    print("[1/4] Parsing Design Case...")
+    design = SQLParser(design_sql, _elec_carbon, _gas_carbon,
+                       _elec_rate, _gas_rate).parse()
+    print("  Site EUI: {} kWh/m2/yr".format(design['energy']['siteEUI']))
+
+    # [2/4] Parse reference case
+    print("[2/4] Parsing Reference Case...")
+    reference = SQLParser(ref_sql, _elec_carbon, _gas_carbon,
+                          _elec_rate, _gas_rate).parse()
+    print("  Site EUI: {} kWh/m2/yr".format(reference['energy']['siteEUI']))
+
+    # [3/4] Calculate comparison
+    print("[3/4] Calculating Comparison...")
+    comparison = calc_comparison(design, reference)
+
+    # [4/4] Generate dashboard
+    print("[4/4] Generating Dashboard...")
+    results = {
+        'projectName': _project_name,
+        'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+        'design': design,
+        'reference': reference,
+        'comparison': comparison
+    }
+
+    output_dir = os.path.dirname(design_sql)
+    safe_name = _project_name.replace(' ', '_')
+    output_path = os.path.join(output_dir,
+        "GDS_Comparison_{}.html".format(safe_name))
+
+    html = get_html_template().replace('RESULTS_PLACEHOLDER', json.dumps(results))
+    with open(output_path, 'w', encoding='utf-8') as f:
+        f.write(html)
+
+    html_path = output_path
+    report = build_report(design, reference, comparison)
+
+    # Expose monthly data as outputs (full precision, kWh)
+    monthly_design_total = design['energy']['monthlyTotal']
+    monthly_design_elec = design['energy']['monthlyElec']
+    monthly_design_gas = design['energy']['monthlyGas']
+    monthly_design_district = design['energy'].get('monthlyDistrict', [0]*12)
+    monthly_ref_total = reference['energy']['monthlyTotal']
+    monthly_ref_elec = reference['energy']['monthlyElec']
+    monthly_ref_gas = reference['energy']['monthlyGas']
+    monthly_ref_district = reference['energy'].get('monthlyDistrict', [0]*12)
+
+    print("\nDashboard saved: {}".format(html_path))
+    print(report)
+
+    if _auto_open:
+        webbrowser.open('file://' + os.path.abspath(output_path))
+
+    print("\nDone!")
+else:
+    report = "Set _run to True to execute."

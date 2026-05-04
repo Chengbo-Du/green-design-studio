@@ -1,0 +1,27 @@
+cff-version: 0.1.0
+message: "If you use this software, please cite both the software and the associated paper."
+title: "Green Design Studio: A Modular Integration Layer for Cross-Domain Building Performance Simulation"
+authors:
+  - family-names: Du
+    given-names: Chengbo
+    email: cdu113@syr.edu
+    affiliation: "SyracuseCoE, Syracuse University"
+  - family-names: Zhang
+    given-names: Jianshun
+    affiliation: "SyracuseCoE, Syracuse University"
+version: "0.1.0"
+date-released: "2026-05-04"
+license: BSD-3-Clause
+repository-code: "https://github.com/Chengbo-Du/gds"
+type: software
+preferred-citation:
+  type: article
+  title: "[Green Design Studio: A Modular Integration Layer for Cross-Domain Building Performance Simulation]"
+  authors:
+    - family-names: Du
+      given-names: Chengbo
+    - family-names: Zhang
+      given-names: Jianshun
+  journal: "Building and Environment"
+  year: 2026
+  doi: "[to be added]"

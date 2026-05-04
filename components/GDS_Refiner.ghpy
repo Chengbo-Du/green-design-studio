@@ -1,27 +1,34 @@
 """
-GDS GBE Refiner v8: Assembly Designer with Hub Integration
-===========================================================
-Full integration with GDS Hub - reads HVAC, PV, SHW, IDF configs automatically.
+GDS Refiner
+===========
 
-v8 - MODULAR: HVAC presets imported from gds-core package
-     Run 'pip install gds-core' before using this script
+SPDX-License-Identifier: BSD-3-Clause
+Copyright (c) 2026 SyracuseCoE, Syracuse University. All rights reserved.
 
-v7 - HUB INTEGRATION:
-- Reads GDS_HVAC_DEFAULT from Hub and auto-creates default HVAC system
-- Reads GDS_PV_CONFIG from Hub and applies PV to all shades
-- Reads GDS_SOLHW_CONFIG from Hub and injects SHW system into model
-- Reads GDS_RENEWABLES_IDF from Hub and injects Battery/Wind IDF strings
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the conditions stated in the
+LICENSE file distributed with this project are met.
+
+Author: Chengbo Du <cdu113@syr.edu>
+
+Edit a Honeybee Model. Provides room- and surface-level overrides and
+applies the HVAC, PV, SHW, DHW, and battery/wind IDF configurations
+published by GDS Hub. Output is written to .hbjson.
 
 INPUTS:
-    _model: A Honeybee Model
-    _run: Boolean/Button to launch the UI
-    _gds_library: Path to GDS module database JSON file (optional)
-    _output_path_: Output .hbjson file path (optional)
-    _preview_name_: Nickname of Brep parameter for preview
+    _model         : Honeybee Model
+    _run           : Trigger UI
+    _gds_library   : Path to GDS module database JSON (optional)
+    _output_path_  : Output .hbjson path (default: temp file)
+    _preview_name_ : Brep parameter nickname for preview
+                     (default "GDS envelope preview")
+    _case_suffix_  : Suffix for model name and simulation folder
+                     (default "designcase")
 
 OUTPUTS:
-    hbjson_path: Path to the saved .hbjson file
-    report: Status messages
+    hbjson_path : Path to the saved .hbjson
+    sim_folder  : Simulation folder path
+    report      : Status messages
 """
 
 import Rhino
@@ -32,6 +39,7 @@ import Eto.Drawing as drawing
 import scriptcontext as sc
 import json
 import os
+import re
 import tempfile
 import time
 import hashlib
@@ -39,36 +47,6 @@ import hashlib
 from Grasshopper import DataTree
 from Grasshopper.Kernel.Data import GH_Path
 import Grasshopper
-
-# ========================= GDS-CORE IMPORTS ==================================
-try:
-    from gds import __version__ as GDS_CORE_VERSION
-    from gds.presets.hvac import (
-        HVAC_CATEGORIES, HVAC_VINTAGES, HVAC_ECONOMIZER_TYPES, HVAC_RADIANT_TYPES
-    )
-    GDS_CORE_AVAILABLE = True
-except ImportError:
-    GDS_CORE_AVAILABLE = False
-    GDS_CORE_VERSION = "N/A"
-    print("WARNING: gds-core not installed. Using embedded HVAC presets.")
-    
-    # Fallback HVAC presets
-    HVAC_CATEGORIES = {
-        "Ideal Air (Loads Only)": {
-            "class": "IdealAirSystem",
-            "description": "Perfect HVAC for load calculations",
-            "equipment_types": ["IdealAirSystem"]
-        },
-        "All-Air: VAV": {
-            "class": "VAV",
-            "description": "Variable Air Volume systems",
-            "equipment_types": ["VAV_Chiller_Boiler", "VAV_Chiller_ASHP", "VAV_Chiller_DHW"]
-        },
-    }
-    HVAC_VINTAGES = ["ASHRAE_2019", "ASHRAE_2016", "ASHRAE_2013"]
-    HVAC_ECONOMIZER_TYPES = ["NoEconomizer", "DifferentialDryBulb", "DifferentialEnthalpy"]
-    HVAC_RADIANT_TYPES = ["Floor", "Ceiling", "FloorWithCarpet", "CeilingMetalPanel"]
-# =============================================================================
 
 STORAGE_KEY = "HB_SURFACE_PROP_EDITOR_V5"
 DIALOG_KEY = "HB_SURFACE_PROP_EDITOR_V5_DIALOG"
@@ -78,22 +56,97 @@ OUTPUT_PATH_KEY = "HB_SURFACE_PROP_EDITOR_V5_OUTPUT_PATH"
 MODEL_HASH_KEY = "HB_SURFACE_PROP_EDITOR_V5_MODEL_HASH"
 LAST_MODIFICATIONS_KEY = "HB_SURFACE_PROP_EDITOR_V5_LAST_MODS"
 RELEASE_OUTPUT_KEY = "HB_SURFACE_PROP_EDITOR_V5_RELEASE"
-HVAC_CONFIG_KEY = "GDS_HVAC_CONFIG"
-HVAC_DEFAULT_KEY = "GDS_HVAC_DEFAULT"
-PV_CONFIG_KEY = "GDS_PV_CONFIG"
-SOLHW_CONFIG_KEY = "GDS_SOLHW_CONFIG"
-IDF_CONFIG_KEY = "GDS_RENEWABLES_IDF"
+HVAC_CONFIG_KEY = "GDS_HVAC_CONFIG"  # HVAC config from GDS Hub
+HVAC_DEFAULT_KEY = "GDS_HVAC_DEFAULT"  # Default HVAC config from GDS Hub
+PV_CONFIG_KEY = "GDS_PV_CONFIG"  # PV properties from GDS Hub (v7)
+SOLHW_CONFIG_KEY = "GDS_SOLHW_CONFIG"  # Solar Hot Water config from GDS Hub (v7)
+SHW_CONFIG_KEY = "GDS_SHW_SYSTEM"  # DHW heater config from Hub Service Module
+IDF_CONFIG_KEY = "GDS_RENEWABLES_IDF"  # IDF injection string from GDS Hub (v7)
 
-# Version info for window title
-GDS_REFINER_VERSION = "v8"
-if GDS_CORE_AVAILABLE:
-    REFINER_TITLE = "GDS Refiner {} (core {})".format(GDS_REFINER_VERSION, GDS_CORE_VERSION)
-else:
-    REFINER_TITLE = "GDS Refiner {} (standalone)".format(GDS_REFINER_VERSION)
+# HVAC system categories and options (same as GDS Hub)
+HVAC_CATEGORIES = {
+    "Ideal Air (Loads Only)": {
+        "class": "IdealAirSystem",
+        "description": "Perfect HVAC for load calculations",
+        "equipment_types": ["IdealAirSystem"]
+    },
+    "All-Air: VAV": {
+        "class": "VAV",
+        "description": "Variable Air Volume systems",
+        "equipment_types": ["VAV_Chiller_Boiler", "VAV_Chiller_ASHP", "VAV_Chiller_DHW", 
+                           "VAV_Chiller_PFP", "VAV_Chiller_GasCoil", "VAV_ACChiller_Boiler",
+                           "VAV_ACChiller_ASHP", "VAV_ACChiller_DHW", "VAV_ACChiller_PFP",
+                           "VAV_ACChiller_GasCoil", "VAV_DCW_Boiler", "VAV_DCW_ASHP",
+                           "VAV_DCW_DHW", "VAV_DCW_PFP", "VAV_DCW_GasCoil"]
+    },
+    "All-Air: PVAV": {
+        "class": "PVAV",
+        "description": "Packaged VAV rooftop units",
+        "equipment_types": ["PVAV_Boiler", "PVAV_ASHP", "PVAV_DHW", "PVAV_PFP", "PVAV_BoilerElectricReheat"]
+    },
+    "All-Air: PSZ": {
+        "class": "PSZ",
+        "description": "Packaged Single Zone units",
+        "equipment_types": ["PSZAC", "PSZAC_GasCoil", "PSZAC_DHW", "PSZHP"]
+    },
+    "DOAS + FCU": {
+        "class": "FCUwithDOAS",
+        "description": "DOAS with Fan Coil Units",
+        "equipment_types": ["DOAS_FCU_Chiller_Boiler", "DOAS_FCU_Chiller_ASHP", 
+                           "DOAS_FCU_Chiller_DHW", "DOAS_FCU_Chiller_ElectricBaseboard",
+                           "DOAS_FCU_Chiller", "DOAS_FCU_ACChiller_Boiler",
+                           "DOAS_FCU_ACChiller_ASHP", "DOAS_FCU_ACChiller_DHW",
+                           "DOAS_FCU_ACChiller_ElectricBaseboard", "DOAS_FCU_ACChiller",
+                           "DOAS_FCU_DCW_Boiler", "DOAS_FCU_DCW_ASHP", "DOAS_FCU_DCW_DHW",
+                           "DOAS_FCU_DCW_ElectricBaseboard", "DOAS_FCU_DCW"]
+    },
+    "DOAS + VRF": {
+        "class": "VRFwithDOAS",
+        "description": "DOAS with VRF system",
+        "equipment_types": ["DOAS_VRF"]
+    },
+    "DOAS + WSHP": {
+        "class": "WSHPwithDOAS",
+        "description": "DOAS with Water Source Heat Pumps",
+        "equipment_types": ["DOAS_WSHP_FluidCooler_Boiler", "DOAS_WSHP_CoolingTower_Boiler",
+                           "DOAS_WSHP_GSHP", "DOAS_WSHP_DCW_DHW"]
+    },
+    "DOAS + Radiant": {
+        "class": "RadiantwithDOAS",
+        "description": "DOAS with radiant heating/cooling",
+        "equipment_types": ["DOAS_Radiant_Chiller_Boiler", "DOAS_Radiant_Chiller_ASHP",
+                           "DOAS_Radiant_Chiller_DHW", "DOAS_Radiant_ACChiller_Boiler",
+                           "DOAS_Radiant_ACChiller_ASHP", "DOAS_Radiant_ACChiller_DHW",
+                           "DOAS_Radiant_DCW_Boiler", "DOAS_Radiant_DCW_ASHP",
+                           "DOAS_Radiant_DCW_DHW"]
+    },
+    "HeatCool: Baseboard": {
+        "class": "Baseboard",
+        "description": "Baseboard heating systems",
+        "equipment_types": ["ElectricBaseboard", "BoilerBaseboard", "ASHPBaseboard", "DHWBaseboard"]
+    },
+    "HeatCool: Residential": {
+        "class": "Residential",
+        "description": "Residential split systems",
+        "equipment_types": ["ResidentialAC_ElectricBaseboard", "ResidentialAC_BoilerBaseboard",
+                           "ResidentialAC_ASHPBaseboard", "ResidentialAC_DHWBaseboard",
+                           "ResidentialAC_ResidentialFurnace", "ResidentialHP",
+                           "ResidentialHPNoCool", "ResidentialFurnace"]
+    },
+    "Radiant Only": {
+        "class": "Radiant",
+        "description": "Radiant heating/cooling only",
+        "equipment_types": ["Radiant_Chiller_Boiler", "Radiant_Chiller_ASHP", "Radiant_Chiller_DHW",
+                           "Radiant_ACChiller_Boiler", "Radiant_ACChiller_ASHP", "Radiant_ACChiller_DHW",
+                           "Radiant_DCW_Boiler", "Radiant_DCW_ASHP", "Radiant_DCW_DHW"]
+    },
+}
 
+HVAC_VINTAGES = ["ASHRAE_2019", "ASHRAE_2016", "ASHRAE_2013", "ASHRAE_2010", "ASHRAE_2007", "ASHRAE_2004"]
+HVAC_ECONOMIZER_TYPES = ["NoEconomizer", "DifferentialDryBulb", "DifferentialEnthalpy"]
+HVAC_RADIANT_TYPES = ["Floor", "Ceiling", "FloorWithCarpet", "CeilingMetalPanel"]
 
-
-# ======================= HUB INTEGRATION FUNCTIONS (v7) =======================
+# --- HUB INTEGRATION FUNCTIONS ---
 
 def load_hub_hvac_default():
     """Load HVAC default configuration from GDS Hub."""
@@ -102,7 +155,6 @@ def load_hub_hvac_default():
         print("GDS Hub: Loaded HVAC default - {}".format(hub_default.get('preset_name', 'Unknown')))
         return hub_default
     return None
-
 
 def load_hub_pv_config():
     """Load PV configuration from GDS Hub."""
@@ -113,16 +165,33 @@ def load_hub_pv_config():
         return pv_config
     return None
 
-
 def load_hub_shw_config():
-    """Load Solar Hot Water configuration from GDS Hub."""
-    shw_config = sc.sticky.get(SOLHW_CONFIG_KEY, None)
-    if shw_config and isinstance(shw_config, dict) and shw_config.get('enabled', False):
-        print("GDS Hub: Loaded SHW config - {} m² collector".format(
-            shw_config.get('collector_area', 0)))
+    """Load SHW configuration from GDS Hub.
+    
+    Checks two sources in priority order:
+    1. GDS_SHW_SYSTEM (Service Module — DHW heater type + tank params)
+    2. GDS_SOLHW_CONFIG (Module 5 — solar thermal, requires enabled=True)
+    """
+    # Source 1: Service Module DHW heater (always applies if present)
+    shw_config = sc.sticky.get(SHW_CONFIG_KEY, None)
+    if shw_config and isinstance(shw_config, dict) and shw_config.get('equipment_type'):
+        print("GDS Hub: Loaded SHW config - {}".format(
+            shw_config.get('equipment_type', 'Unknown')))
+        # Merge solar collector info if also configured
+        solhw = sc.sticky.get(SOLHW_CONFIG_KEY, None)
+        if solhw and isinstance(solhw, dict) and solhw.get('enabled', False):
+            shw_config['collector_area'] = solhw.get('collector_area', 0)
+            shw_config['collector_type'] = solhw.get('collector_type', '')
         return shw_config
+    
+    # Source 2: Solar HW only (legacy path)
+    solhw = sc.sticky.get(SOLHW_CONFIG_KEY, None)
+    if solhw and isinstance(solhw, dict) and solhw.get('enabled', False):
+        print("GDS Hub: Loaded SHW config (solar only) - {} m2 collector".format(
+            solhw.get('collector_area', 0)))
+        return solhw
+    
     return None
-
 
 def load_hub_idf_injection():
     """Load IDF injection string from GDS Hub (Battery, Wind)."""
@@ -134,7 +203,6 @@ def load_hub_idf_injection():
             print("GDS Hub: Loaded IDF injection string")
             return idf_string
     return None
-
 
 def apply_pv_to_model_dict(model_dict, pv_config):
     """
@@ -180,23 +248,24 @@ def apply_pv_to_model_dict(model_dict, pv_config):
     
     return pv_count, pv_shade_names
 
-
 def apply_shw_to_model_dict(model_dict, shw_config):
     """
     Apply SHW system to model dict.
+    Uses config values for equipment type, efficiency, tank UA, ambient.
+    Only assigns to rooms whose program has ServiceHotWater demand.
     Returns: (success, report_message)
     """
     if not shw_config:
         return False, ""
     
-    # Build SHW system dict
+    # Build SHW system dict from config
     shw_dict = {
         'type': 'SHWSystem',
         'identifier': 'GDS_SHW_System',
         'equipment_type': shw_config.get('equipment_type', 'Gas_WaterHeater'),
         'heater_efficiency': shw_config.get('efficiency', 0.8),
-        'ambient_condition': 22.0,
-        'ambient_loss_coefficient': 0.8,
+        'ambient_condition': shw_config.get('ambient', 22.0),
+        'ambient_loss_coefficient': shw_config.get('tank_ua', 6.0),
     }
     
     # Ensure energy properties exist
@@ -207,27 +276,45 @@ def apply_shw_to_model_dict(model_dict, shw_config):
     if 'shws' not in model_dict['properties']['energy']:
         model_dict['properties']['energy']['shws'] = []
     
-    # Add SHW system
-    existing_ids = {s.get('identifier') for s in model_dict['properties']['energy']['shws']}
-    if shw_dict['identifier'] not in existing_ids:
-        model_dict['properties']['energy']['shws'].append(shw_dict)
+    # Add or replace SHW system
+    shws = model_dict['properties']['energy']['shws']
+    shws[:] = [s for s in shws if s.get('identifier') != shw_dict['identifier']]
+    shws.append(shw_dict)
     
-    # Assign to all rooms
+    # Build lookup: which programs have SHW demand?
+    progs_with_shw = set()
+    for prog in model_dict['properties']['energy'].get('program_types', []):
+        if prog.get('service_hot_water') is not None:
+            progs_with_shw.add(prog.get('identifier', ''))
+    
+    # Assign SHW system only to rooms with SHW demand
+    assigned = 0
     for room_dict in model_dict.get('rooms', []):
         if 'properties' not in room_dict:
             room_dict['properties'] = {}
         if 'energy' not in room_dict['properties']:
             room_dict['properties']['energy'] = {}
-        room_dict['properties']['energy']['shw'] = shw_dict['identifier']
+        
+        pid = room_dict['properties']['energy'].get('program_type', '')
+        if pid in progs_with_shw:
+            room_dict['properties']['energy']['shw'] = shw_dict['identifier']
+            assigned += 1
+        else:
+            room_dict['properties']['energy'].pop('shw', None)
+    
+    report = "SHW: {} (eff={}, UA={} W/K, amb={}C) -> {} rooms".format(
+        shw_dict['equipment_type'],
+        shw_dict['heater_efficiency'],
+        shw_dict['ambient_loss_coefficient'],
+        shw_dict['ambient_condition'],
+        assigned
+    )
     
     collector_area = shw_config.get('collector_area', 0)
     if collector_area > 0:
-        report = "SHW: {} ({} m² solar)".format(shw_config.get('equipment_type', 'Unknown'), collector_area)
-    else:
-        report = "SHW: {}".format(shw_config.get('equipment_type', 'Unknown'))
+        report += " + {} m2 solar".format(collector_area)
     
     return True, report
-
 
 def inject_idf_to_model_dict(model_dict, idf_string):
     """
@@ -258,9 +345,7 @@ def inject_idf_to_model_dict(model_dict, idf_string):
     
     return True, "IDF: {} objects injected".format(obj_count)
 
-
-# ======================= END HUB INTEGRATION FUNCTIONS ========================
-
+# --- END HUB INTEGRATION FUNCTIONS ---
 
 def get_model_hash(model):
     """
@@ -273,7 +358,6 @@ def get_model_hash(model):
         return hashlib.md5(model_str.encode()).hexdigest()
     except:
         return None
-
 
 def get_modifications_hash(modified_faces, modified_apertures, modified_doors):
     """
@@ -290,7 +374,6 @@ def get_modifications_hash(modified_faces, modified_apertures, modified_doors):
         return hashlib.md5(mods_str.encode()).hexdigest()
     except:
         return None
-
 
 def get_unique_filepath(filepath):
     """
@@ -311,7 +394,6 @@ def get_unique_filepath(filepath):
             timestamp = int(time.time())
             return "{}_{}{}".format(base, timestamp, ext)
 
-
 def get_output_filepath(user_path=None):
     """
     Get the output filepath.
@@ -325,7 +407,6 @@ def get_output_filepath(user_path=None):
         timestamp = int(time.time())
         filename = "hb_modified_model_{}.hbjson".format(timestamp)
         return os.path.join(temp_dir, filename)
-
 
 def create_brep_from_vertices(vertices):
     """Create Brep from ladybug Point3D vertices"""
@@ -358,7 +439,6 @@ def create_brep_from_vertices(vertices):
     except:
         return None
 
-
 def find_preview_component(nickname):
     """Find a GH component by nickname"""
     try:
@@ -369,7 +449,6 @@ def find_preview_component(nickname):
     except:
         pass
     return None
-
 
 def update_preview_component(nickname, breps):
     """Update preview component with breps - thread safe"""
@@ -395,11 +474,9 @@ def update_preview_component(nickname, breps):
     except:
         do_update()
 
-
 def clear_preview_component(nickname):
     """Clear preview component"""
     update_preview_component(nickname, [])
-
 
 def expire_gh_component():
     """Expire the main GH component to trigger recalculation"""
@@ -412,7 +489,6 @@ def expire_gh_component():
                 Rhino.RhinoApp.InvokeOnUiThread(System.Action(do_expire))
     except:
         pass
-
 
 class GDSLibraryParser:
     """Parse GDS module database"""
@@ -555,7 +631,6 @@ class GDSLibraryParser:
                 result[name] = data
         return result
 
-
 class SurfacePropertyEditor(forms.Form):
     """Main editor dialog - MODELESS with preview support"""
     
@@ -579,8 +654,12 @@ class SurfacePropertyEditor(forms.Form):
         # HVAC: New data structures for system grouping
         self.hvac_systems = {}  # system_name -> config (defines the HVAC systems)
         self.room_hvac_assignments = {}  # room_id -> system_name (assigns rooms to systems)
+        self.room_hvac_names = {}  # room_id -> display_name (for ID migration when model rebuilds)
         self.room_list = []
         self.room_breps = {}  # NEW: Store room geometry for preview (room_id -> list of breps)
+        self.program_assignments = {}  # v9
+        self.available_programs = []  # v9
+        self.room_exhaust_assignments = {}  # room_id -> list of exhaust spec dicts
         
         if STORAGE_KEY in sc.sticky:
             stored = sc.sticky[STORAGE_KEY]
@@ -591,25 +670,62 @@ class SurfacePropertyEditor(forms.Form):
             # Load new HVAC data structures
             self.hvac_systems = dict(stored.get('hvac_systems', {}))
             self.room_hvac_assignments = dict(stored.get('room_hvac_assignments', {}))
+            self.room_hvac_names = dict(stored.get('room_hvac_names', {}))
+            self.program_assignments = dict(stored.get('program_assignments', {}))
+            stored_exh = stored.get('room_exhaust_assignments', {})
+            self.room_exhaust_assignments = {rid: list(v) for rid, v in stored_exh.items()}
         
-        # v7: Load Hub's HVAC default and pre-create system if none defined
-        if not self.hvac_systems:
-            hub_hvac = load_hub_hvac_default()
-            if hub_hvac:
-                system_name = "Hub_{}".format(hub_hvac.get('preset_name', 'Default'))
-                self.hvac_systems[system_name] = {
-                    'class': hub_hvac.get('class', 'IdealAirSystem'),
-                    'equipment_type': hub_hvac.get('equipment_type', 'IdealAirSystem'),
-                    'vintage': hub_hvac.get('vintage', 'ASHRAE_2019'),
-                    'economizer_type': hub_hvac.get('economizer_type', 'NoEconomizer'),
-                    'sensible_heat_recovery': hub_hvac.get('sensible_heat_recovery', 0),
-                    'latent_heat_recovery': hub_hvac.get('latent_heat_recovery', 0),
-                    'demand_controlled_ventilation': hub_hvac.get('demand_controlled_ventilation', False),
-                    'radiant_type': hub_hvac.get('radiant_type', 'Floor'),
-                }
-                print("Created HVAC system from Hub: {}".format(system_name))
+        # Always sync Hub HVAC default (replaces v7 first-load-only logic)
+        hub_hvac = load_hub_hvac_default()
+        if hub_hvac:
+            system_name = "Hub_{}".format(hub_hvac.get('preset_name', 'Default'))
+            new_cfg = {
+                'class': hub_hvac.get('class', 'IdealAirSystem'),
+                'equipment_type': hub_hvac.get('equipment_type', 'IdealAirSystem'),
+                'vintage': hub_hvac.get('vintage', 'ASHRAE_2019'),
+                'economizer_type': hub_hvac.get('economizer_type', 'NoEconomizer'),
+                'sensible_heat_recovery': hub_hvac.get('sensible_heat_recovery', 0),
+                'latent_heat_recovery': hub_hvac.get('latent_heat_recovery', 0),
+                'demand_controlled_ventilation': hub_hvac.get('demand_controlled_ventilation', False),
+                'radiant_type': hub_hvac.get('radiant_type', 'Floor'),
+            }
+            # Remove any stale Hub_ systems and replace with current
+            stale = [k for k in self.hvac_systems if k.startswith('Hub_')]
+            for k in stale:
+                del self.hvac_systems[k]
+            self.hvac_systems[system_name] = new_cfg
+            # Re-assign rooms that were on stale Hub_ systems to the new one
+            for rid, sname in list(self.room_hvac_assignments.items()):
+                if sname in stale or sname.startswith('Hub_'):
+                    self.room_hvac_assignments[rid] = system_name
+            print("Hub HVAC synced: {}".format(system_name))
         
         self._extract_model_data()
+        
+        # Auto-assign all rooms to Hub HVAC if no prior assignments exist
+        if self.hvac_systems and not self.room_hvac_assignments:
+            hub_names = [n for n in self.hvac_systems if n.startswith('Hub_')]
+            if hub_names:
+                default_sys = hub_names[0]
+                for r in self.room_list:
+                    self.room_hvac_assignments[r['id']] = default_sys
+                print("Auto-assigned {} rooms to Hub HVAC: {}".format(
+                    len(self.room_list), default_sys))
+        
+        seen_p = set()
+        for r in self.room_list:
+            p = r.get('program', '')
+            if p and not p.startswith('<') and not p.startswith('*'):
+                if p not in seen_p:
+                    seen_p.add(p)
+                    self.available_programs.append(p)
+        # Also load HB library program identifiers (strings only)
+        self.hb_lib_programs = []
+        try:
+            from honeybee_energy.lib.programtypes import PROGRAM_TYPES
+            self.hb_lib_programs = sorted(list(PROGRAM_TYPES))
+        except:
+            pass
         self._setup_form()
         self.Closed += self._on_form_closed
         return self
@@ -632,11 +748,19 @@ class SurfacePropertyEditor(forms.Form):
                 if room.properties.energy.hvac is not None:
                     hvac_status = str(type(room.properties.energy.hvac).__name__)[:15]
             
+            prog_id = '<none>'
+            if room_id in self.program_assignments:
+                prog_id = '* ' + self.program_assignments[room_id][:15]
+            elif hasattr(room.properties, 'energy'):
+                p = getattr(room.properties.energy, 'program_type', None)
+                if p is not None:
+                    prog_id = getattr(p, 'identifier', str(p))[:17]
             self.room_list.append({
                 'id': room_id,
                 'name': room_name,
                 'area': room_area,
-                'hvac': hvac_status
+                'hvac': hvac_status,
+                'program': prog_id
             })
             
             # NEW: Collect all breps for this room for preview
@@ -709,12 +833,74 @@ class SurfacePropertyEditor(forms.Form):
             if room_brep_list:
                 self.room_breps[room_id] = room_brep_list
         
+        # Migrate HVAC assignments when room IDs have changed (model rebuilt upstream)
+        self._migrate_hvac_assignments()
+        
         self.filtered_faces = list(self.face_list)
         self.filtered_apertures = list(self.aperture_list)
         self.filtered_doors = list(self.door_list)
     
+    def _migrate_hvac_assignments(self):
+        """Migrate HVAC assignments when room identifiers have changed.
+        
+        Honeybee regenerates room.identifier (with hash suffixes) whenever
+        the model is rebuilt upstream. This breaks room_hvac_assignments which
+        maps room_id -> system_name. We recover by matching on display_name,
+        which is user-controlled and stable across rebuilds.
+        """
+        if not self.room_hvac_assignments:
+            return
+        
+        current_ids = {r['id'] for r in self.room_list}
+        stale_ids = [rid for rid in self.room_hvac_assignments if rid not in current_ids]
+        
+        if not stale_ids:
+            return  # All IDs still valid, no migration needed
+        
+        # Build name -> new_id map from current model (first match wins)
+        name_to_new_id = {}
+        for r in self.room_list:
+            if r['name'] not in name_to_new_id:
+                name_to_new_id[r['name']] = r['id']
+        
+        migrated = {}
+        lost = []
+        for old_id in stale_ids:
+            system_name = self.room_hvac_assignments[old_id]
+            old_name = self.room_hvac_names.get(old_id)
+            
+            if old_name and old_name in name_to_new_id:
+                new_id = name_to_new_id[old_name]
+                # Only migrate if the new_id isn't already assigned
+                if new_id not in self.room_hvac_assignments and new_id not in migrated:
+                    migrated[new_id] = system_name
+                else:
+                    lost.append(old_id)
+            else:
+                lost.append(old_id)
+        
+        # Apply migration: remove stale, add migrated
+        for old_id in stale_ids:
+            del self.room_hvac_assignments[old_id]
+            if old_id in self.room_hvac_names:
+                del self.room_hvac_names[old_id]
+        
+        for new_id, sys_name in migrated.items():
+            self.room_hvac_assignments[new_id] = sys_name
+            # Update name map with new ID
+            for r in self.room_list:
+                if r['id'] == new_id:
+                    self.room_hvac_names[new_id] = r['name']
+                    break
+        
+        if migrated or lost:
+            msg = "HVAC migration: {} remapped".format(len(migrated))
+            if lost:
+                msg += ", {} lost (room removed/renamed)".format(len(lost))
+            print(msg)
+    
     def _setup_form(self):
-        self.Title = REFINER_TITLE
+        self.Title = "GDS - GBE Refiner"
         self.Resizable = True
         self.Size = drawing.Size(950, 800)
         self.Padding = drawing.Padding(10)
@@ -755,6 +941,13 @@ class SurfacePropertyEditor(forms.Form):
         hvac_tab = forms.TabPage(Text="HVAC Systems ({})".format(len(self.room_list)))
         hvac_tab.Content = self._create_hvac_panel()
         self.tabs.Pages.Add(hvac_tab)
+        try:
+            prog_tab = forms.TabPage(Text="Room Service ({})".format(len(self.room_list)))
+            prog_tab.Content = self._create_program_panel()
+            self.tabs.Pages.Add(prog_tab)
+        except Exception as ex:
+            import traceback
+            print("Program tab error: " + traceback.format_exc())
         main_layout.Add(self.tabs, yscale=True)
         
         self.status_label = forms.Label()
@@ -809,8 +1002,9 @@ class SurfacePropertyEditor(forms.Form):
         mod_face_count = len([f for f in self.face_list if f['id'] in self.modified_faces])
         mod_ap_count = len([a for a in self.aperture_list if a['id'] in self.modified_apertures])
         mod_door_count = len([d for d in self.door_list if d['id'] in self.modified_doors])
-        self.status_label.Text = "Modified: {} faces, {} apertures, {} doors".format(
-            mod_face_count, mod_ap_count, mod_door_count)
+        pc = len(self.program_assignments)
+        self.status_label.Text = "Modified: {} faces, {} aps, {} doors | Programs: {}".format(
+            mod_face_count, mod_ap_count, mod_door_count, pc)
     
     def _update_preview(self):
         """Update preview - includes faces, apertures, doors, rooms, and shading selections"""
@@ -1326,7 +1520,7 @@ class SurfacePropertyEditor(forms.Form):
             len(ext_walls), len(ext_apertures), len(ext_doors))
         inner_layout.Add(forms.Label(Text=info_text))
         
-        # ===== Wall Shading Section =====
+        # --- Wall Shading Section ---
         wall_group = forms.GroupBox(Text="Wall Shading ({} exterior walls)".format(len(ext_walls)))
         wall_layout = forms.DynamicLayout()
         wall_layout.Spacing = drawing.Size(5, 5)
@@ -1414,7 +1608,7 @@ class SurfacePropertyEditor(forms.Form):
         wall_group.Content = wall_layout
         inner_layout.Add(wall_group)
         
-        # ===== Aperture Shading Section =====
+        # --- Aperture Shading Section ---
         ap_group = forms.GroupBox(Text="Aperture Shading ({} exterior)".format(len(ext_apertures)))
         ap_layout = forms.DynamicLayout()
         ap_layout.Spacing = drawing.Size(5, 5)
@@ -1561,7 +1755,7 @@ class SurfacePropertyEditor(forms.Form):
         ap_group.Content = ap_layout
         inner_layout.Add(ap_group)
         
-        # ===== Door Shading Section =====
+        # --- Door Shading Section ---
         door_group = forms.GroupBox(Text="Door Shading ({} exterior)".format(len(ext_doors)))
         door_layout = forms.DynamicLayout()
         door_layout.Spacing = drawing.Size(5, 5)
@@ -1858,6 +2052,330 @@ class SurfacePropertyEditor(forms.Form):
         
         return layout
     
+    # --- PROGRAM TAB ---
+    
+    def _create_program_panel(self):
+        layout = forms.DynamicLayout()
+        layout.Spacing = drawing.Size(8, 8)
+        layout.Padding = drawing.Padding(5)
+        info = forms.GroupBox(Text="Room Service: Program + Exhaust")
+        il = forms.DynamicLayout()
+        il.Padding = drawing.Padding(8)
+        il.AddRow(forms.Label(Text="Override per-room programs for the design case."))
+        n_model = len(self.available_programs)
+        n_hblib = len(self.hb_lib_programs)
+        info_parts = []
+        if n_model:
+            info_parts.append("{} from model: {}".format(n_model, ", ".join(self.available_programs[:3])))
+        if n_hblib:
+            info_parts.append("{} from HB library".format(n_hblib))
+        il.AddRow(forms.Label(Text=", ".join(info_parts) if info_parts else "No programs available."))
+        info.Content = il
+        layout.Add(info)
+        cols = forms.DynamicLayout()
+        cols.BeginHorizontal()
+        rg = forms.GroupBox(Text="Rooms ({})".format(len(self.room_list)))
+        rl = forms.DynamicLayout()
+        rl.Spacing = drawing.Size(5, 5)
+        rl.Padding = drawing.Padding(5)
+        self.prog_grid = forms.GridView()
+        self.prog_grid.Height = 300
+        self.prog_grid.AllowMultipleSelection = True
+        gc1 = forms.GridColumn()
+        gc1.HeaderText = "Room"
+        gc1.DataCell = forms.TextBoxCell(0)
+        gc1.Width = 150
+        self.prog_grid.Columns.Add(gc1)
+        gc2 = forms.GridColumn()
+        gc2.HeaderText = "Area"
+        gc2.DataCell = forms.TextBoxCell(1)
+        gc2.Width = 55
+        self.prog_grid.Columns.Add(gc2)
+        gc3 = forms.GridColumn()
+        gc3.HeaderText = "Program"
+        gc3.DataCell = forms.TextBoxCell(2)
+        gc3.Width = 150
+        self.prog_grid.Columns.Add(gc3)
+        gc4 = forms.GridColumn()
+        gc4.HeaderText = "Exhaust"
+        gc4.DataCell = forms.TextBoxCell(3)
+        gc4.Width = 90
+        self.prog_grid.Columns.Add(gc4)
+        rl.Add(self.prog_grid, yscale=True)
+        rg.Content = rl
+        cols.Add(rg, xscale=True)
+        ag = forms.GroupBox(Text="Assign Program")
+        al = forms.DynamicLayout()
+        al.Spacing = drawing.Size(5, 5)
+        al.Padding = drawing.Padding(8)
+        al.AddRow(forms.Label(Text="Select program:"))
+        self.dd_prog = forms.DropDown()
+        for pid in self.available_programs:
+            self.dd_prog.Items.Add(pid)
+        for hid in self.hb_lib_programs:
+            if hid not in self.available_programs:
+                self.dd_prog.Items.Add("[HB] " + hid)
+        if self.dd_prog.Items.Count == 0:
+            self.dd_prog.Items.Add("(none)")
+        self.dd_prog.SelectedIndex = 0
+        al.AddRow(self.dd_prog)
+        row1 = forms.DynamicLayout()
+        row1.BeginHorizontal()
+        ba = forms.Button(Text="Assign to Selected")
+        ba.Click += self._on_prog_assign
+        row1.Add(ba, xscale=True)
+        baa = forms.Button(Text="Assign to All Rooms")
+        baa.Click += self._on_prog_assign_all
+        row1.Add(baa, xscale=True)
+        row1.EndHorizontal()
+        al.Add(row1)
+        row2 = forms.DynamicLayout()
+        row2.BeginHorizontal()
+        bu = forms.Button(Text="Remove Override")
+        bu.Click += self._on_prog_unassign
+        row2.Add(bu, xscale=True)
+        bc = forms.Button(Text="Clear All Overrides")
+        bc.Click += self._on_prog_clear
+        row2.Add(bc, xscale=True)
+        row2.EndHorizontal()
+        al.Add(row2)
+        self.lbl_pstat = forms.Label(Text="")
+        al.AddRow(self.lbl_pstat)
+        ag.Content = al
+        # Build right-side vertical stack (Assign Program above Exhaust Fans)
+        right_stack = forms.DynamicLayout()
+        right_stack.Spacing = drawing.Size(5, 8)
+        right_stack.Add(ag)
+        # --- Exhaust Fan Section (Room Service) ---
+        eg = forms.GroupBox(Text="Exhaust Fans")
+        el = forms.DynamicLayout()
+        el.Spacing = drawing.Size(5, 5)
+        el.Padding = drawing.Padding(8)
+        
+        el.AddRow(forms.Label(Text="Preview (selected room):"))
+        self.lbl_exh_preview = forms.Label(Text="(no room selected)")
+        el.AddRow(self.lbl_exh_preview)
+        
+        el.AddRow(forms.Label(Text="-- Add new exhaust fan to selected room(s) --"))
+        
+        rx1 = forms.DynamicLayout()
+        rx1.BeginHorizontal()
+        lf = forms.Label(Text="Flow (m3/s):"); lf.Width = 90
+        rx1.Add(lf)
+        self.num_exh_flow = forms.NumericStepper()
+        self.num_exh_flow.DecimalPlaces = 4
+        self.num_exh_flow.MinValue = 0.0001
+        self.num_exh_flow.MaxValue = 10.0
+        self.num_exh_flow.Value = 0.012
+        self.num_exh_flow.Increment = 0.001
+        self.num_exh_flow.Width = 85
+        rx1.Add(self.num_exh_flow)
+        lp = forms.Label(Text="Press (Pa):"); lp.Width = 75
+        rx1.Add(lp)
+        self.num_exh_press = forms.NumericStepper()
+        self.num_exh_press.DecimalPlaces = 1
+        self.num_exh_press.MinValue = 0.0
+        self.num_exh_press.MaxValue = 2000.0
+        self.num_exh_press.Value = 100.0
+        self.num_exh_press.Increment = 5.0
+        self.num_exh_press.Width = 75
+        rx1.Add(self.num_exh_press)
+        rx1.EndHorizontal()
+        el.Add(rx1)
+        
+        rx2 = forms.DynamicLayout()
+        rx2.BeginHorizontal()
+        le = forms.Label(Text="Efficiency:"); le.Width = 90
+        rx2.Add(le)
+        self.num_exh_eff = forms.NumericStepper()
+        self.num_exh_eff.DecimalPlaces = 2
+        self.num_exh_eff.MinValue = 0.1
+        self.num_exh_eff.MaxValue = 1.0
+        self.num_exh_eff.Value = 0.5
+        self.num_exh_eff.Increment = 0.05
+        self.num_exh_eff.Width = 85
+        rx2.Add(self.num_exh_eff)
+        lv = forms.Label(Text="Vent type:"); lv.Width = 75
+        rx2.Add(lv)
+        self.dd_exh_type = forms.DropDown()
+        for vt in ["Exhaust", "Intake", "Balanced"]:
+            self.dd_exh_type.Items.Add(vt)
+        self.dd_exh_type.SelectedIndex = 0
+        self.dd_exh_type.Width = 90
+        rx2.Add(self.dd_exh_type)
+        rx2.EndHorizontal()
+        el.Add(rx2)
+        
+        rx3 = forms.DynamicLayout()
+        rx3.BeginHorizontal()
+        b_add_exh = forms.Button(Text="Add Exhaust to Selected")
+        b_add_exh.Click += self._on_exh_add
+        rx3.Add(b_add_exh, xscale=True)
+        b_clr_exh = forms.Button(Text="Clear Exhausts on Selected")
+        b_clr_exh.Click += self._on_exh_clear
+        rx3.Add(b_clr_exh, xscale=True)
+        rx3.EndHorizontal()
+        el.Add(rx3)
+        
+        self.lbl_exhstat = forms.Label(Text="")
+        el.AddRow(self.lbl_exhstat)
+        
+        eg.Content = el
+        right_stack.Add(eg)
+        cols.Add(right_stack, xscale=True)
+        cols.EndHorizontal()
+        layout.Add(cols, yscale=True)
+        
+        try:
+            self.prog_grid.SelectionChanged += self._on_prog_grid_selection_changed
+        except Exception:
+            pass
+        
+        self._refresh_prog_grid()
+        return layout
+    
+    def _refresh_prog_grid(self):
+        rows = []
+        for r in self.room_list:
+            p = r.get('program', '<none>')
+            if r['id'] in self.program_assignments:
+                p = "* " + self.program_assignments[r['id']][:17]
+            exh_list = self.room_exhaust_assignments.get(r['id'], [])
+            n_exh = len(exh_list)
+            if n_exh == 0:
+                exh_txt = "-"
+            elif n_exh == 1:
+                spec = exh_list[0]
+                exh_txt = "{} @{:.3f}".format(spec.get('vent_type', 'Exh')[:4], spec.get('flow', 0))
+            else:
+                exh_txt = "{} fans".format(n_exh)
+            rows.append([r['name'][:22], "{:.0f}".format(r['area']), p, exh_txt])
+        self.prog_grid.DataStore = rows
+    
+    def _on_prog_assign(self, s, e):
+        pid = str(self.dd_prog.SelectedValue)
+        if not pid or pid == "(none)":
+            return
+        if pid.startswith("[HB] "):
+            pid = pid[5:]
+        sel = list(self.prog_grid.SelectedRows)
+        if not sel:
+            self.lbl_pstat.Text = "Select rooms first."
+            return
+        ct = 0
+        for i in sel:
+            if i < len(self.room_list):
+                self.program_assignments[self.room_list[i]['id']] = pid
+                ct += 1
+        self._refresh_prog_grid()
+        self.lbl_pstat.Text = "'{}' -> {} room(s)".format(pid[:20], ct)
+    
+    def _on_prog_assign_all(self, s, e):
+        pid = str(self.dd_prog.SelectedValue)
+        if not pid or pid == "(none)":
+            return
+        if pid.startswith("[HB] "):
+            pid = pid[5:]
+        for r in self.room_list:
+            self.program_assignments[r['id']] = pid
+        self._refresh_prog_grid()
+        self.lbl_pstat.Text = "'{}' -> all {} rooms".format(pid[:20], len(self.room_list))
+    
+    def _on_prog_unassign(self, s, e):
+        ct = 0
+        for i in list(self.prog_grid.SelectedRows):
+            if i < len(self.room_list):
+                rid = self.room_list[i]['id']
+                if rid in self.program_assignments:
+                    del self.program_assignments[rid]
+                    ct += 1
+        self._refresh_prog_grid()
+        self.lbl_pstat.Text = "Removed {} override(s)".format(ct)
+    
+    def _on_prog_clear(self, s, e):
+        self.program_assignments.clear()
+        self._refresh_prog_grid()
+        self.lbl_pstat.Text = "Cleared."
+    
+    # ---------- Exhaust Fan handlers (Room Service) ----------
+    def _on_prog_grid_selection_changed(self, s, e):
+        try:
+            sel = list(self.prog_grid.SelectedRows)
+            if len(sel) == 1 and sel[0] < len(self.room_list):
+                room = self.room_list[sel[0]]
+                rid = room['id']
+                exh_list = self.room_exhaust_assignments.get(rid, [])
+                if not exh_list:
+                    self.lbl_exh_preview.Text = "{}: no exhaust fans".format(room['name'][:30])
+                else:
+                    parts = ["{}: {} fan(s):".format(room['name'][:30], len(exh_list))]
+                    for i, spec in enumerate(exh_list):
+                        parts.append("  {}. {} @{:.4f} m3/s  P={:.0f}Pa  eff={:.2f}".format(
+                            i+1, spec.get('vent_type', 'Exhaust'),
+                            spec.get('flow', 0),
+                            spec.get('pressure_rise', 0),
+                            spec.get('fan_efficiency', 0)))
+                    self.lbl_exh_preview.Text = "\n".join(parts)
+                if rid in self.room_hvac_assignments:
+                    sysname = self.room_hvac_assignments[rid]
+                    if sysname in self.hvac_systems:
+                        hvac_cls = self.hvac_systems[sysname].get('class', '')
+                        vt = self._default_vent_type_for_hvac(hvac_cls)
+                        idx_map = {"Exhaust": 0, "Intake": 1, "Balanced": 2}
+                        self.dd_exh_type.SelectedIndex = idx_map.get(vt, 0)
+            elif len(sel) > 1:
+                self.lbl_exh_preview.Text = "{} rooms selected".format(len(sel))
+            else:
+                self.lbl_exh_preview.Text = "(no room selected)"
+        except Exception as ex:
+            print("exh preview update error: {}".format(ex))
+    
+    def _default_vent_type_for_hvac(self, hvac_class):
+        # Always default to Exhaust. The 'Balanced' option pairs an intake fan with
+        # an exhaust fan and conditions the supply air, which can substantially
+        # increase energy use in cold climates if the fan runs continuously.
+        # Most bathroom/kitchen exhaust use cases want Exhaust.
+        return "Exhaust"
+    
+    def _on_exh_add(self, s, e):
+        sel = list(self.prog_grid.SelectedRows)
+        if not sel:
+            self.lbl_exhstat.Text = "Select rooms first."
+            return
+        spec = {
+            'flow': float(self.num_exh_flow.Value),
+            'pressure_rise': float(self.num_exh_press.Value),
+            'fan_efficiency': float(self.num_exh_eff.Value),
+            'vent_type': str(self.dd_exh_type.SelectedValue),
+        }
+        ct = 0
+        for i in sel:
+            if i < len(self.room_list):
+                rid = self.room_list[i]['id']
+                if rid not in self.room_exhaust_assignments:
+                    self.room_exhaust_assignments[rid] = []
+                self.room_exhaust_assignments[rid].append(dict(spec))
+                ct += 1
+        self._refresh_prog_grid()
+        self.lbl_exhstat.Text = "Added {} fan(s) to {} room(s)".format(spec['vent_type'], ct)
+        self._on_prog_grid_selection_changed(None, None)
+    
+    def _on_exh_clear(self, s, e):
+        sel = list(self.prog_grid.SelectedRows)
+        if not sel:
+            self.lbl_exhstat.Text = "Select rooms first."
+            return
+        ct = 0
+        for i in sel:
+            if i < len(self.room_list):
+                rid = self.room_list[i]['id']
+                if rid in self.room_exhaust_assignments:
+                    del self.room_exhaust_assignments[rid]
+                    ct += 1
+        self._refresh_prog_grid()
+        self.lbl_exhstat.Text = "Cleared exhausts on {} room(s)".format(ct)
+        self._on_prog_grid_selection_changed(None, None)
+    
     def _refresh_hvac_room_grid(self):
         """Refresh the HVAC room grid based on filter"""
         filter_idx = self.dd_hvac_filter.SelectedIndex
@@ -1965,8 +2483,17 @@ class SurfacePropertyEditor(forms.Form):
         # Load into form
         self.txt_hvac_system_name.Text = sys_name
         
-        # Find and set category
-        cat_name = config.get('category', 'Ideal Air (Loads Only)')
+        # Find and set category (reverse-lookup from class name)
+        hvac_class = config.get('class', 'IdealAirSystem')
+        cat_name = config.get('category', '')
+        if not cat_name:
+            # Reverse-lookup: find category whose class matches
+            for cname, cdata in HVAC_CATEGORIES.items():
+                if cdata.get('class') == hvac_class:
+                    cat_name = cname
+                    break
+            if not cat_name:
+                cat_name = 'Ideal Air (Loads Only)'
         for i in range(self.dd_hvac_category.Items.Count):
             if str(self.dd_hvac_category.Items[i]) == cat_name:
                 self.dd_hvac_category.SelectedIndex = i
@@ -2019,6 +2546,7 @@ class SurfacePropertyEditor(forms.Form):
         rooms_to_unassign = [r_id for r_id, s_name in self.room_hvac_assignments.items() if s_name == sys_name]
         for r_id in rooms_to_unassign:
             del self.room_hvac_assignments[r_id]
+            self.room_hvac_names.pop(r_id, None)
         
         # Delete the system
         del self.hvac_systems[sys_name]
@@ -2068,6 +2596,8 @@ class SurfacePropertyEditor(forms.Form):
             if idx < len(self.filtered_hvac_rooms):
                 room_id = self.filtered_hvac_rooms[idx]['id']
                 self.room_hvac_assignments[room_id] = system_name
+                # Store display_name for ID migration on model rebuild
+                self.room_hvac_names[room_id] = self.filtered_hvac_rooms[idx]['name']
                 count += 1
         
         self._refresh_hvac_room_grid()
@@ -2090,6 +2620,7 @@ class SurfacePropertyEditor(forms.Form):
                 room_id = self.filtered_hvac_rooms[idx]['id']
                 if room_id in self.room_hvac_assignments:
                     del self.room_hvac_assignments[room_id]
+                    self.room_hvac_names.pop(room_id, None)
                     count += 1
         
         self._refresh_hvac_room_grid()
@@ -2589,6 +3120,8 @@ class SurfacePropertyEditor(forms.Form):
         self.shading_config = {}
         self.hvac_systems = {}
         self.room_hvac_assignments = {}
+        self.room_hvac_names = {}
+        self.program_assignments = {}
         for f in self.face_list:
             f['construction'] = '<Unchanged>'
             f['modifier'] = '<Unchanged>'
@@ -2627,6 +3160,9 @@ class SurfacePropertyEditor(forms.Form):
             'shading': dict(self.shading_config),
             'hvac_systems': dict(self.hvac_systems),
             'room_hvac_assignments': dict(self.room_hvac_assignments),
+            'room_hvac_names': dict(self.room_hvac_names),
+            'program_assignments': dict(self.program_assignments),
+            'room_exhaust_assignments': {rid: list(v) for rid, v in self.room_exhaust_assignments.items()},
             'force_update': False
         }
         shade_count = len(self.shading_config)
@@ -2643,6 +3179,9 @@ class SurfacePropertyEditor(forms.Form):
             'shading': dict(self.shading_config),
             'hvac_systems': dict(self.hvac_systems),
             'room_hvac_assignments': dict(self.room_hvac_assignments),
+            'room_hvac_names': dict(self.room_hvac_names),
+            'program_assignments': dict(self.program_assignments),
+            'room_exhaust_assignments': {rid: list(v) for rid, v in self.room_exhaust_assignments.items()},
             'force_update': True
         }
         sc.sticky[RELEASE_OUTPUT_KEY] = False
@@ -2661,6 +3200,9 @@ class SurfacePropertyEditor(forms.Form):
             'shading': dict(self.shading_config),
             'hvac_systems': dict(self.hvac_systems),
             'room_hvac_assignments': dict(self.room_hvac_assignments),
+            'room_hvac_names': dict(self.room_hvac_names),
+            'program_assignments': dict(self.program_assignments),
+            'room_exhaust_assignments': {rid: list(v) for rid, v in self.room_exhaust_assignments.items()},
             'force_update': True
         }
         sc.sticky[RELEASE_OUTPUT_KEY] = True
@@ -2674,7 +3216,6 @@ class SurfacePropertyEditor(forms.Form):
         clear_preview_component(self.preview_nickname)
         if DIALOG_KEY in sc.sticky:
             del sc.sticky[DIALOG_KEY]
-
 
 def get_construction_dict(identifier, gds_constructions, is_window=False):
     """Get construction as dictionary for embedding in model JSON"""
@@ -2707,7 +3248,6 @@ def get_construction_dict(identifier, gds_constructions, is_window=False):
                 pass
     return None
 
-
 def get_modifier_dict(identifier, gds_modifiers):
     """Get modifier as dictionary for embedding in model JSON"""
     if not identifier or identifier == '<Unchanged>':
@@ -2726,7 +3266,6 @@ def get_modifier_dict(identifier, gds_modifiers):
         except:
             pass
     return None
-
 
 def apply_shading_to_model(hb_model, shading_config):
     """
@@ -2795,7 +3334,6 @@ def apply_shading_to_model(hb_model, shading_config):
                             error_count += 1
     
     return shade_count, error_count
-
 
 def build_hvac_dict(system_name, hvac_config):
     """
@@ -2901,14 +3439,16 @@ def build_hvac_dict(system_name, hvac_config):
     
     return hvac_dict
 
-
-def build_modified_model_file(hb_model, modified_faces, modified_apertures, modified_doors, shading_config, hvac_systems, room_hvac_assignments, gds_parser, output_path):
+def build_modified_model_file(hb_model, modified_faces, modified_apertures, modified_doors, shading_config, hvac_systems, room_hvac_assignments, program_assignments, gds_parser, output_path, case_suffix="designcase", room_exhaust_assignments=None):
     """
     Build complete modified model and save to .hbjson file.
     
+    v8: Added case_suffix parameter for model naming and sim_folder output.
     v6: HVAC system grouping - multiple rooms can share the same HVAC system.
     hvac_systems: dict of system_name -> config
     room_hvac_assignments: dict of room_id -> system_name
+    
+    Returns: (hbjson_path, sim_folder, report)
     """
     report_lines = ["Model Modification Report", "=" * 40]
     
@@ -2922,8 +3462,156 @@ def build_modified_model_file(hb_model, modified_faces, modified_apertures, modi
             if shade_errors > 0:
                 report_lines.append("  ({} shading errors)".format(shade_errors))
     
-    # Now convert to dict
+    # Step 0.5: Build VentilationFan dicts for later injection into model_dict.
+    # We build them HERE while we have direct access to hb_model.rooms (for ID matching),
+    # but inject AFTER to_dict() to avoid isinstance issues with HB's property setters.
+    exh_count = 0
+    fan_dicts_by_room_id = {}  # room.identifier -> [fan_dict, ...]
+    exh_diag_lines = []
+    exh_diag_lines.append("=== Exhaust Fan Diagnostic ===")
+    exh_diag_lines.append("room_exhaust_assignments keys ({}): {}".format(
+        len(room_exhaust_assignments) if room_exhaust_assignments else 0,
+        list(room_exhaust_assignments.keys())[:5] if room_exhaust_assignments else []))
+    exh_diag_lines.append("Model has {} rooms".format(len(list(hb_model.rooms))))
+    if hb_model.rooms:
+        sample_ids = [r.identifier for r in list(hb_model.rooms)[:3]]
+        exh_diag_lines.append("Sample room.identifier: {}".format(sample_ids))
+    
+    if room_exhaust_assignments:
+        try:
+            from honeybee_energy.ventcool.fan import VentilationFan
+            exh_diag_lines.append("VentilationFan imported OK")
+        except ImportError as imp_ex:
+            exh_diag_lines.append("VentilationFan IMPORT FAILED: {}".format(imp_ex))
+            VentilationFan = None
+            report_lines.append("Exhaust: VentilationFan import failed ({})".format(imp_ex))
+        
+        if VentilationFan is not None:
+            # Build name->room and id->room maps
+            name_to_room = {}
+            id_to_room = {}
+            for room in hb_model.rooms:
+                id_to_room[room.identifier] = room
+                if room.display_name:
+                    name_to_room[room.display_name] = room
+            
+            for stored_key, specs in room_exhaust_assignments.items():
+                room = id_to_room.get(stored_key)
+                match_mode = "identifier"
+                if room is None:
+                    room = name_to_room.get(stored_key)
+                    match_mode = "display_name"
+                if room is None:
+                    exh_diag_lines.append("NO MATCH for stored key '{}'".format(stored_key[:40]))
+                    continue
+                exh_diag_lines.append("Match for '{}' (via {}): {} spec(s)".format(
+                    stored_key[:40], match_mode, len(specs)))
+                
+                room_fan_dicts = []
+                for i, spec in enumerate(specs):
+                    fan_id = "{}_Exh_{}".format(room.identifier[:40], i)
+                    flow_rate = float(spec.get('flow', 0.012))
+                    vent_type = str(spec.get('vent_type', 'Exhaust'))
+                    pressure_rise = float(spec.get('pressure_rise', 100.0))
+                    efficiency = float(spec.get('fan_efficiency', 0.5))
+                    
+                    fan_dict = None
+                    # Try: construct positionally, setattr the rest, call to_dict()
+                    try:
+                        fan = VentilationFan(fan_id, flow_rate)
+                        # Set optional props via setattr (works regardless of constructor signature)
+                        for attr_name, attr_val in [('vent_type', vent_type),
+                                                     ('pressure_rise', pressure_rise),
+                                                     ('efficiency', efficiency)]:
+                            try:
+                                setattr(fan, attr_name, attr_val)
+                            except Exception as sa_ex:
+                                exh_diag_lines.append("  setattr {}={}: {}".format(attr_name, attr_val, sa_ex))
+                        # Get HB's official dict representation
+                        try:
+                            fan_dict = fan.to_dict()
+                            exh_diag_lines.append("  fan.to_dict() OK for {}: keys={}".format(
+                                fan_id[:40], list(fan_dict.keys())))
+                        except Exception as td_ex:
+                            exh_diag_lines.append("  fan.to_dict() FAILED for {}: {}".format(
+                                fan_id[:40], td_ex))
+                        
+                        # Force user's UI choices into the dict regardless of HB version's
+                        # property name conventions. Write BOTH naming variants so HB Load
+                        # Objects accepts the dict whichever it expects.
+                        if fan_dict is not None:
+                            fan_dict['ventilation_type'] = vent_type
+                            fan_dict['vent_type'] = vent_type
+                            fan_dict['flow_rate'] = flow_rate
+                            fan_dict['pressure_rise'] = pressure_rise
+                            fan_dict['efficiency'] = efficiency
+                            exh_diag_lines.append("  Forced ventilation_type={} into dict".format(vent_type))
+                    except Exception as ctor_ex:
+                        exh_diag_lines.append("  VentilationFan ctor FAILED for {}: {}".format(
+                            fan_id[:40], ctor_ex))
+                    
+                    # Fallback: manual dict matching HB schema
+                    if fan_dict is None:
+                        fan_dict = {
+                            'type': 'VentilationFan',
+                            'identifier': fan_id,
+                            'flow_rate': flow_rate,
+                            'vent_type': vent_type,
+                            'pressure_rise': pressure_rise,
+                            'efficiency': efficiency,
+                        }
+                        exh_diag_lines.append("  Using fallback manual dict for {}".format(fan_id[:40]))
+                    
+                    room_fan_dicts.append(fan_dict)
+                    exh_count += 1
+                
+                if room_fan_dicts:
+                    fan_dicts_by_room_id[room.identifier] = room_fan_dicts
+        
+        if exh_count > 0:
+            report_lines.append("Exhaust: {} fan dict(s) prepared".format(exh_count))
+        else:
+            report_lines.append("Exhaust: 0 fan dicts prepared (see diagnostic log)")
+    else:
+        exh_diag_lines.append("room_exhaust_assignments is empty/None")
+        # Now convert to dict
     model_dict = hb_model.to_dict()
+    
+    # Step 0.5b: Inject exhaust fan dicts into model_dict (bypasses isinstance issues)
+    if fan_dicts_by_room_id:
+        attached_count = 0
+        for room_dict in model_dict.get('rooms', []):
+            rid = room_dict.get('identifier', '')
+            if rid not in fan_dicts_by_room_id:
+                continue
+            if 'properties' not in room_dict:
+                room_dict['properties'] = {}
+            if 'energy' not in room_dict['properties']:
+                room_dict['properties']['energy'] = {}
+            existing_fans = room_dict['properties']['energy'].get('fans', [])
+            if not isinstance(existing_fans, list):
+                existing_fans = []
+            new_fans_for_room = fan_dicts_by_room_id[rid]
+            room_dict['properties']['energy']['fans'] = existing_fans + new_fans_for_room
+            attached_count += len(new_fans_for_room)
+            exh_diag_lines.append("Injected {} fan(s) into model_dict for '{}'".format(
+                len(new_fans_for_room), rid[:40]))
+        report_lines.append("Exhaust: {} fan(s) injected into model_dict".format(attached_count))
+    
+    # Write diagnostic log next to output file
+    try:
+        import os as _os
+        _diag_path = _os.path.join(_os.path.dirname(output_path), "exhaust_diagnostic.log")
+        with open(_diag_path, "w") as _df:
+            _df.write("\n".join(exh_diag_lines))
+        report_lines.append("Exhaust diagnostic written: {}".format(_diag_path))
+    except Exception as _diag_ex:
+        report_lines.append("Failed to write exhaust diagnostic: {}".format(_diag_ex))
+    
+    # Set model name with case suffix
+    model_name = "GDS_{}".format(case_suffix.lstrip('_').replace(' ', '_'))
+    model_dict['identifier'] = model_name
+    model_dict['display_name'] = model_name
     
     # Step 1: Collect all unique constructions and modifiers
     construction_library = {}
@@ -3122,6 +3810,35 @@ def build_modified_model_file(hb_model, modified_faces, modified_apertures, modi
                 total_hvac_modified += 1
                 print("HVAC assigned: room='{}' -> system='{}'".format(room_id[:25], system_name[:30]))
         
+        # Program override
+        if program_assignments and room_id in program_assignments:
+            target_pid = program_assignments[room_id]
+            donor_prog = None
+            for dr in model_dict.get('rooms', []):
+                drp = dr.get('properties', {}).get('energy', {}).get('program_type', None)
+                if drp and isinstance(drp, dict):
+                    drpid = drp.get('identifier', '')
+                    if drpid == target_pid or re.sub(r'_R\d+$', '', drpid) == target_pid:
+                        donor_prog = dict(drp)
+                        break
+            if not donor_prog:
+                # Fallback: load from HB library
+                try:
+                    from honeybee_energy.lib.programtypes import program_type_by_identifier
+                    hb_prog = program_type_by_identifier(target_pid)
+                    if hb_prog:
+                        donor_prog = hb_prog.to_dict()
+                except:
+                    pass
+            if donor_prog:
+                donor_prog['identifier'] = target_pid + '_' + room_id[:20]
+                if 'properties' not in room_dict:
+                    room_dict['properties'] = {}
+                if 'energy' not in room_dict['properties']:
+                    room_dict['properties']['energy'] = {}
+                room_dict['properties']['energy']['program_type'] = donor_prog
+                print("Program: room='{}' -> '{}'".format(room_id[:25], target_pid[:30]))
+        
         if room_faces_mod > 0 or room_aps_mod > 0 or room_doors_mod > 0:
             report_lines.append("'{}': {} faces, {} apertures, {} doors".format(
                 room_name, room_faces_mod, room_aps_mod, room_doors_mod))
@@ -3149,9 +3866,7 @@ def build_modified_model_file(hb_model, modified_faces, modified_apertures, modi
                 model_dict['properties']['energy']['hvacs'].append(hvac_data)
                 print("Added HVAC to model library: {}".format(hvac_id[:40]))
     
-    # =========================================================================
-    # Step 6: GDS Hub Integration - Apply PV, SHW, IDF (v7)
-    # =========================================================================
+    # --- Step 6: GDS Hub Integration - Apply PV, SHW, IDF ---
     report_lines.append("")
     report_lines.append("--- GDS Hub Integration ---")
     
@@ -3231,16 +3946,20 @@ def build_modified_model_file(hb_model, modified_faces, modified_apertures, modi
         report_lines.append("Saved to: {}".format(output_path))
         report_lines.append("")
         report_lines.append("Connect hbjson_path to HB Load Objects")
+        report_lines.append("Connect sim_folder to HB Model to OSM _folder input")
         
-        return output_path, "\n".join(report_lines)
+        # Build simulation folder path based on model name
+        base_folder = os.path.dirname(output_path)
+        sim_folder = os.path.join(base_folder, model_name)
+        
+        return output_path, sim_folder, "\n".join(report_lines)
     
     except Exception as e:
         report_lines.append("=" * 40)
         report_lines.append("ERROR saving file: {}".format(str(e)))
-        return "", "\n".join(report_lines)
+        return "", None, "\n".join(report_lines)
 
-
-# ============ MAIN EXECUTION ============
+# --- MAIN EXECUTION ---
 
 gds_path = None
 try:
@@ -3253,6 +3972,14 @@ preview_name = "GDS envelope preview"
 try:
     if _preview_name_:
         preview_name = _preview_name_
+except:
+    pass
+
+# Handle optional case suffix
+case_suffix = "designcase"
+try:
+    if _case_suffix_:
+        case_suffix = str(_case_suffix_).strip()
 except:
     pass
 
@@ -3285,6 +4012,7 @@ except:
 
 # Initialize outputs
 hbjson_path = None
+sim_folder = None
 out_report = ""
 
 if model is None:
@@ -3297,9 +4025,7 @@ else:
     sc.sticky[RUN_STATE_KEY] = curr_run
     rising_edge = curr_run and not prev_run
     
-    # =========================================================================
-    # Get modifications and flags
-    # =========================================================================
+    # --- Get modifications and flags ---
     if STORAGE_KEY in sc.sticky:
         stored = sc.sticky[STORAGE_KEY]
         modified_faces = stored.get('faces', {})
@@ -3308,6 +4034,8 @@ else:
         shading_config = stored.get('shading', {})
         hvac_systems = stored.get('hvac_systems', {})
         room_hvac_assignments = stored.get('room_hvac_assignments', {})
+        program_assignments = stored.get('program_assignments', {})
+        room_exhaust_assignments = stored.get('room_exhaust_assignments', {})
         force_update = stored.get('force_update', False)
         
         if force_update:
@@ -3320,15 +4048,15 @@ else:
         shading_config = {}
         hvac_systems = {}
         room_hvac_assignments = {}
+        program_assignments = {}
+        room_exhaust_assignments = {}
         force_update = False
     
     release_output = sc.sticky.get(RELEASE_OUTPUT_KEY, False)
     if release_output:
         sc.sticky[RELEASE_OUTPUT_KEY] = False
     
-    # =========================================================================
-    # CASE 1: Rising edge - ONLY open UI, never generate file
-    # =========================================================================
+    # --- CASE 1: Rising edge - ONLY open UI, never generate file ---
     if rising_edge:
         if DIALOG_KEY in sc.sticky and sc.sticky[DIALOG_KEY] is not None:
             try:
@@ -3360,17 +4088,16 @@ else:
         
         hbjson_path = None
     
-    # =========================================================================
     # CASE 2: force_update=True - User clicked Apply button, generate file
-    # =========================================================================
     elif force_update:
         output_file = get_output_filepath(user_output_path)
         generated_path = None
+        generated_sim_folder = None
         
-        if modified_faces or modified_apertures or modified_doors or shading_config or room_hvac_assignments:
-            # Build and save modified model (includes doors, shading and HVAC)
-            generated_path, detail_report = build_modified_model_file(
-                model, modified_faces, modified_apertures, modified_doors, shading_config, hvac_systems, room_hvac_assignments, gds_parser, output_file)
+        if modified_faces or modified_apertures or modified_doors or shading_config or room_hvac_assignments or program_assignments or room_exhaust_assignments:
+            # Build and save modified model
+            generated_path, generated_sim_folder, detail_report = build_modified_model_file(
+                model, modified_faces, modified_apertures, modified_doors, shading_config, hvac_systems, room_hvac_assignments, program_assignments, gds_parser, output_file, case_suffix, room_exhaust_assignments=room_exhaust_assignments)
             
             if generated_path:
                 sc.sticky[MODEL_HASH_KEY] = get_model_hash(model)
@@ -3378,13 +4105,20 @@ else:
                 sc.sticky[OUTPUT_PATH_KEY] = generated_path
                 out_report = detail_report
         else:
+            # No modifications - save model with case suffix applied
             model_dict = model.to_dict()
+            
+            # Set model name with case suffix
+            model_name = "GDS_{}".format(case_suffix.lstrip('_').replace(' ', '_'))
+            model_dict['identifier'] = model_name
+            model_dict['display_name'] = model_name
             
             try:
                 with open(output_file, 'w') as f:
                     json.dump(model_dict, f, indent=2)
                 
                 generated_path = output_file
+                generated_sim_folder = os.path.join(os.path.dirname(output_file), model_name)
                 sc.sticky[MODEL_HASH_KEY] = get_model_hash(model)
                 sc.sticky[LAST_MODIFICATIONS_KEY] = get_modifications_hash(modified_faces, modified_apertures, modified_doors)
                 sc.sticky[OUTPUT_PATH_KEY] = generated_path
@@ -3400,31 +4134,34 @@ else:
                 
                 report_lines = [
                     "Original Model Saved (No Modifications)",
+                    "Model Name: {}".format(model_name),
                     "=" * 40,
                     "Rooms: {}".format(len(model_dict.get('rooms', []))),
                     "Faces: {}".format(face_count),
                     "Apertures: {}".format(ap_count),
                     "Doors: {}".format(door_count),
                     "",
-                    "Saved to: {}".format(output_file)
+                    "Saved to: {}".format(output_file),
+                    "Sim folder: {}".format(generated_sim_folder)
                 ]
                 out_report = "\n".join(report_lines)
             
             except Exception as e:
                 generated_path = None
+                generated_sim_folder = None
                 out_report = "ERROR saving model: {}".format(str(e))
         
         if release_output and generated_path:
             hbjson_path = generated_path
+            sim_folder = generated_sim_folder
             out_report += "\n\n>>> RUNNING: Output sent to downstream components <<<"
         else:
             hbjson_path = None
+            sim_folder = generated_sim_folder  # Still provide sim_folder even without triggering
             if generated_path:
                 out_report += "\n\nFile saved. Click 'Save & Run' to trigger simulation."
     
-    # =========================================================================
-    # CASE 3: No action - return None, file ready for manual trigger
-    # =========================================================================
+    # --- CASE 3: No action - return None, file ready for manual trigger ---
     else:
         cached_path = sc.sticky.get(OUTPUT_PATH_KEY, None)
         
@@ -3445,3 +4182,4 @@ else:
 # Outputs
 report = out_report
 # hbjson_path is set above (None or path)
+# sim_folder is set above (None or path)

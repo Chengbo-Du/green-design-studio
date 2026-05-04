@@ -1,0 +1,149 @@
+# -*- coding: utf-8 -*-
+"""
+GDS CONTAM Results Viewer
+=========================
+
+SPDX-License-Identifier: BSD-3-Clause
+Copyright (c) 2026 SyracuseCoE, Syracuse University. All rights reserved.
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the conditions stated in the
+LICENSE file distributed with this project are met.
+
+Author: Chengbo Du <cdu113@syr.edu>
+
+Render CONTAM simulation results as an HTML dashboard via
+gds_contam_viewer.py (CPython subprocess).
+
+INPUTS:
+  prj_path     : str   - Path to .prj file (from CONTAM runner)
+  cpython_path : str   - Path to CPython exe (default "C:\\Windows\\py.exe")
+  viewer_path  : str   - Path to gds_contam_viewer.py
+  auto_open    : bool  - Open dashboard in browser (default True)
+  run          : bool  - Set True to generate dashboard
+
+OUTPUTS:
+  dashboard    : str   - Path to generated HTML dashboard
+  msg          : str   - Status / error messages
+"""
+
+import os
+import subprocess
+
+# --- DEFAULTS ---
+
+if 'prj_path' not in dir() or not prj_path:
+    prj_path = ""
+if 'cpython_path' not in dir() or not cpython_path:
+    cpython_path = r"C:\Windows\py.exe"
+if 'viewer_path' not in dir() or not viewer_path:
+    viewer_path = ""
+if 'auto_open' not in dir():
+    auto_open = True
+if 'run' not in dir():
+    run = False
+
+# --- OUTPUTS ---
+
+dashboard = ""
+msg = ""
+
+# --- MAIN ---
+
+if not run:
+    msg = "Set run=True to generate dashboard."
+
+elif not prj_path:
+    msg = "ERROR: No prj_path connected. Wire from CONTAM runner."
+
+elif not os.path.exists(prj_path):
+    # PRJ not found — check for summary JSON instead
+    summary_path = prj_path.replace('.prj', '_summary.json')
+    sim_path = prj_path.replace('.prj', '.sim')
+    
+    # Report what exists in the output folder
+    folder = os.path.dirname(prj_path)
+    if os.path.exists(folder):
+        files = os.listdir(folder)
+        msg = "ERROR: PRJ not found at: {}\n".format(prj_path)
+        msg += "Files in {}: {}\n".format(folder, ", ".join(files) if files else "(empty)")
+        msg += "The CONTAM simulation likely failed. "
+        msg += "Test manually:\n  {} {} from_json {}".format(
+            cpython_path,
+            viewer_path.replace('viewer', 'v3') if viewer_path else '<script_path>',
+            os.path.join(folder, 'gds_spec.json'))
+    else:
+        msg = "ERROR: Output folder does not exist: {}".format(folder)
+
+elif not viewer_path or not os.path.exists(viewer_path):
+    msg = "ERROR: Set viewer_path to gds_contam_viewer.py location."
+
+elif not os.path.exists(cpython_path):
+    msg = "ERROR: CPython not found at: {}".format(cpython_path)
+
+else:
+    try:
+        # Determine mode: prefer summary JSON (has correct ppm from gds_contam_v3's
+        # SIMReader) over raw SIM binary (viewer's parser can misalign on large models)
+        sim_path = prj_path.replace('.prj', '.sim')
+        summary_path = prj_path.replace('.prj', '_summary.json')
+
+        if os.path.exists(summary_path):
+            # JSON mode: pre-computed correct values from pipeline
+            cmd = [cpython_path, viewer_path, '--from-json', summary_path]
+            mode_msg = "JSON summary"
+        elif os.path.exists(sim_path):
+            # Fallback: parse PRJ + SIM binary directly
+            cmd = [cpython_path, viewer_path, prj_path]
+            mode_msg = "PRJ+SIM"
+        else:
+            msg = "ERROR: No _summary.json or .sim found alongside {}".format(prj_path)
+            cmd = None
+            mode_msg = ""
+
+        if cmd:
+            # Clean environment: strip Rhino's Python paths so CPython
+            # uses its own stdlib (prevents SRE module mismatch)
+            env = {}
+            for k, v in os.environ.items():
+                env[k] = v
+            for poison_key in ['PYTHONPATH', 'PYTHONHOME', 'PYTHONSTARTUP',
+                               'IRONPYTHONPATH', 'IRONPYTHONSTARTUP']:
+                env.pop(poison_key, None)
+            if 'PATH' in env:
+                parts = env['PATH'].split(';')
+                parts = [p for p in parts if '.rhinocode' not in p.lower()]
+                env['PATH'] = ';'.join(parts)
+
+            if not auto_open:
+                env['GDS_NO_BROWSER'] = '1'
+
+            proc = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                env=env)
+            stdout, stderr = proc.communicate()
+
+            out_text = stdout.decode('utf-8', errors='replace').strip()
+            err_text = stderr.decode('utf-8', errors='replace').strip()
+
+            # Expected dashboard path
+            dashboard = prj_path.replace('.prj', '_dashboard.html')
+
+            if os.path.exists(dashboard):
+                size_kb = os.path.getsize(dashboard) / 1024.0
+                msg = "Dashboard generated ({} mode, {:.0f} KB): {}".format(
+                    mode_msg, size_kb, dashboard)
+                if out_text:
+                    msg += "\n" + out_text
+            else:
+                msg = "Viewer ran but no dashboard file found.\n"
+                if out_text:
+                    msg += "stdout: {}\n".format(out_text)
+                if err_text:
+                    msg += "stderr: {}\n".format(err_text)
+
+    except Exception as e:
+        import traceback
+        msg = "ERROR: {}\n{}".format(str(e), traceback.format_exc())

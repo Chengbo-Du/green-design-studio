@@ -1,0 +1,3142 @@
+{
+  "modules": {
+    "enclosure.ABC_wall_baseline_exterior": {
+      "meta": {
+        "display_name": "ABC_Wall_Baseline_R5.32",
+        "description": "Pre-retrofit exterior wall assembly",
+        "r_value_ip": 5.32,
+        "r_value_si": 0.937,
+        "u_value_ip": 0.188,
+        "source": "Input Parameters Sheet - Baseline",
+        "assumptions": {
+          "thickness": "0.3m assumed for wall assembly",
+          "conductivity": "0.320 W/m\u00b7K back-calculated from R-value",
+          "density": "1800 kg/m\u00b3 typical",
+          "specific_heat": "900 J/kg\u00b7K typical"
+        }
+      },
+      "design": {
+        "thermal": {
+          "layers": [
+            {
+              "type": "EnergyMaterial",
+              "thickness": 0.3,
+              "conductivity": 0.32,
+              "density": 1800,
+              "specific_heat": 900,
+              "roughness": "MediumRough",
+              "thermal_absorptance": 0.9,
+              "solar_absorptance": 0.7,
+              "visible_absorptance": 0.7
+            }
+          ]
+        }
+      }
+    },
+    "enclosure.ABC_roof_baseline_exterior": {
+      "meta": {
+        "display_name": "ABC_Roof_Baseline_R18.18",
+        "description": "Pre-retrofit roof assembly",
+        "r_value_ip": 18.18,
+        "r_value_si": 3.202,
+        "source": "Input Parameters Sheet - Baseline",
+        "assumptions": {
+          "thickness": "0.25m for roof assembly",
+          "conductivity": "0.078 W/m\u00b7K back-calculated",
+          "density": "800 kg/m\u00b3 typical",
+          "specific_heat": "900 J/kg\u00b7K typical"
+        }
+      },
+      "design": {
+        "thermal": {
+          "layers": [
+            {
+              "type": "EnergyMaterial",
+              "thickness": 0.25,
+              "conductivity": 0.078,
+              "density": 800,
+              "specific_heat": 900,
+              "roughness": "MediumRough",
+              "thermal_absorptance": 0.9,
+              "solar_absorptance": 0.7,
+              "visible_absorptance": 0.7
+            }
+          ]
+        }
+      }
+    },
+    "enclosure.ABC_door_opaque_baseline_exterior": {
+      "meta": {
+        "display_name": "ABC_Door_Baseline_R2.27",
+        "description": "Pre-retrofit opaque exterior door",
+        "r_value_ip": 2.27,
+        "r_value_si": 0.4,
+        "u_value_ip": 0.44,
+        "u_value_si": 2.5,
+        "source": "Input Parameters Sheet - Baseline",
+        "assumptions": {
+          "thickness": "0.05m typical door",
+          "conductivity": "0.125 W/m\u00b7K back-calculated"
+        }
+      },
+      "design": {
+        "thermal": {
+          "layers": [
+            {
+              "type": "EnergyMaterial",
+              "thickness": 0.05,
+              "conductivity": 0.125,
+              "density": 700,
+              "specific_heat": 500,
+              "roughness": "MediumSmooth",
+              "thermal_absorptance": 0.9,
+              "solar_absorptance": 0.6,
+              "visible_absorptance": 0.6
+            }
+          ]
+        }
+      }
+    },
+    "enclosure.ABC_window_operable_baseline_exterior": {
+      "meta": {
+        "display_name": "ABC_Window_Operable_U0.64_SHGC0.348",
+        "description": "Pre-retrofit operable window",
+        "u_value_ip": 0.64,
+        "u_value_si": 3.634,
+        "shgc": 0.348,
+        "source": "Input Parameters Sheet - Baseline",
+        "assumptions": {
+          "visible_transmittance": "0.4 assumed for lower SHGC glazing"
+        }
+      },
+      "design": {
+        "thermal": {
+          "layers": [
+            {
+              "type": "EnergyWindowMaterialSimpleGlazSys",
+              "u_factor": 3.634,
+              "shgc": 0.348,
+              "visible_transmittance": 0.4
+            }
+          ]
+        }
+      }
+    },
+    "enclosure.ABC_window_fixed_baseline_exterior": {
+      "meta": {
+        "display_name": "ABC_Window_Fixed_U0.64_SHGC0.615",
+        "description": "Pre-retrofit fixed window",
+        "u_value_ip": 0.64,
+        "u_value_si": 3.634,
+        "shgc": 0.615,
+        "source": "Input Parameters Sheet - Baseline",
+        "assumptions": {
+          "visible_transmittance": "0.7 assumed for clear glazing"
+        }
+      },
+      "design": {
+        "thermal": {
+          "layers": [
+            {
+              "type": "EnergyWindowMaterialSimpleGlazSys",
+              "u_factor": 3.634,
+              "shgc": 0.615,
+              "visible_transmittance": 0.7
+            }
+          ]
+        }
+      }
+    },
+    "loads.ABC_bedroom_baseline": {
+      "meta": {
+        "display_name": "ABC_Bedroom_Baseline",
+        "description": "Bedroom Baseline",
+        "source": "Input Parameters Sheet - Baseline; equipment per measured electricity sub-meter data"
+      },
+      "design": {
+        "people_per_area": 0.0269,
+        "lighting_power": 5.17,
+        "equipment_power": 18.0,
+        "infiltration_rate": 0.0007,
+        "ventilation_per_person": 0.0,
+        "ventilation_per_area": 0.000332,
+        "shw_flow_per_area": 0,
+        "shw_target_temp": 48.9
+      }
+    },
+    "loads.ABC_livingroom_kitchen_baseline": {
+      "meta": {
+        "display_name": "ABC_LivingRoom_Kitchen_Baseline",
+        "description": "LivingRoom Kitchen Baseline",
+        "source": "Input Parameters Sheet - Baseline; equipment per measured electricity sub-meter data"
+      },
+      "design": {
+        "people_per_area": 0.0269,
+        "lighting_power": 5.17,
+        "equipment_power": 28.0,
+        "infiltration_rate": 0.0007,
+        "ventilation_per_person": 0.0,
+        "ventilation_per_area": 0.000332,
+        "shw_flow_per_area": 0.271,
+        "shw_target_temp": 48.9
+      }
+    },
+    "loads.ABC_bathroom_baseline": {
+      "meta": {
+        "display_name": "ABC_Bathroom_Baseline",
+        "description": "Bathroom Baseline",
+        "source": "Input Parameters Sheet - Baseline; equipment per measured electricity sub-meter data"
+      },
+      "design": {
+        "people_per_area": 0.01,
+        "lighting_power": 5.17,
+        "equipment_power": 2.5,
+        "infiltration_rate": 0.0007,
+        "ventilation_per_person": 0.0,
+        "ventilation_per_area": 0.000332,
+        "shw_flow_per_area": 5.35,
+        "shw_target_temp": 48.9
+      }
+    },
+    "program.ABC_bedroom_baseline": {
+      "meta": {
+        "display_name": "ABC_Bedroom_Baseline",
+        "description": "Bedroom Baseline",
+        "source": "Input Parameters Sheet - Baseline",
+        "assumptions": {
+          "occupancy": "400 ft\u00b2/person \u2192 0.0269 ppl/m\u00b2",
+          "activity": "450 Btu/h/person \u2192 132 W/person",
+          "lighting": "0.48 W/ft\u00b2 \u2192 5.17 W/m\u00b2",
+          "equipment": "18 W/m\u00b2 (mini-fridge, computer, TV, gaming, chargers)",
+          "infiltration": "0.0007 m\u00b3/s/m\u00b2 with seasonal schedule (ABC_Infil_Bed_A8)",
+          "ventilation": "0.49 ACH \u2192 0.000332 m\u00b3/s/m\u00b2 (8 ft ceiling)",
+          "shw": "0 \u2014 no plumbing fixtures in bedrooms"
+        }
+      },
+      "design": {
+        "people": {
+          "people_per_area": 0.0269,
+          "radiant_fraction": 0.3,
+          "latent_fraction": 0.5,
+          "occupancy_schedule": "ABC_Bedroom_Occ",
+          "activity_schedule": "ABC_Activity_132W"
+        },
+        "lighting": {
+          "watts_per_area": 5.17,
+          "schedule": "ABC_Bedroom_Occ",
+          "visible_fraction": 0.25,
+          "radiant_fraction": 0.32
+        },
+        "electric_equipment": {
+          "watts_per_area": 18.0,
+          "schedule": "ABC_Bedroom_Occ",
+          "radiant_fraction": 0.5,
+          "latent_fraction": 0.07
+        },
+        "infiltration": {
+          "flow_per_exterior_area": 0.0007,
+          "schedule": "Always On"
+        },
+        "ventilation": {
+          "outdoor_air_per_person": 0.0,
+          "outdoor_air_per_area": 0.000332
+        },
+        "setpoint": {
+          "heating_schedule": "ABC_Heating_23C",
+          "cooling_schedule": "ABC_No_Cooling"
+        },
+        "service_hot_water": {
+          "flow_per_area": 0,
+          "target_temperature": 48.9,
+          "sensible_fraction": 0.2,
+          "latent_fraction": 0.05,
+          "schedule": "ABC_SHW_A8"
+        }
+      }
+    },
+    "program.ABC_livingroom_kitchen_baseline": {
+      "meta": {
+        "display_name": "ABC_LivingRoom_Kitchen_Baseline",
+        "description": "LivingRoom Kitchen Baseline",
+        "source": "Input Parameters Sheet - Baseline",
+        "assumptions": {
+          "occupancy": "400 ft\u00b2/person \u2192 0.0269 ppl/m\u00b2",
+          "activity": "450 Btu/h/person \u2192 132 W/person",
+          "lighting": "0.48 W/ft\u00b2 \u2192 5.17 W/m\u00b2",
+          "equipment": "28 W/m\u00b2 (cooking, entertainment, multiple devices)",
+          "infiltration": "0.0007 m\u00b3/s/m\u00b2 with seasonal schedule (ABC_Infil_LK_A8)",
+          "ventilation": "0.49 ACH \u2192 0.000332 m\u00b3/s/m\u00b2 (8 ft ceiling)",
+          "shw": "0.271 L/h/m\u00b2 \u2014 30% of measured DHW (kitchen sink), from water heater sub-meters"
+        }
+      },
+      "design": {
+        "people": {
+          "people_per_area": 0.0269,
+          "radiant_fraction": 0.3,
+          "latent_fraction": 0.5,
+          "occupancy_schedule": "ABC_LivingRoom_Occ",
+          "activity_schedule": "ABC_Activity_132W"
+        },
+        "lighting": {
+          "watts_per_area": 5.17,
+          "schedule": "ABC_LivingRoom_Occ",
+          "visible_fraction": 0.25,
+          "radiant_fraction": 0.32
+        },
+        "electric_equipment": {
+          "watts_per_area": 28.0,
+          "schedule": "ABC_LivingRoom_Occ",
+          "radiant_fraction": 0.45,
+          "latent_fraction": 0.15
+        },
+        "infiltration": {
+          "flow_per_exterior_area": 0.0007,
+          "schedule": "Always On"
+        },
+        "ventilation": {
+          "outdoor_air_per_person": 0.0,
+          "outdoor_air_per_area": 0.000332
+        },
+        "setpoint": {
+          "heating_schedule": "ABC_Heating_23C",
+          "cooling_schedule": "ABC_No_Cooling"
+        },
+        "service_hot_water": {
+          "flow_per_area": 0.271,
+          "target_temperature": 48.9,
+          "sensible_fraction": 0.2,
+          "latent_fraction": 0.05,
+          "schedule": "ABC_SHW_A8"
+        }
+      }
+    },
+    "program.ABC_bathroom_baseline": {
+      "meta": {
+        "display_name": "ABC_Bathroom_Baseline",
+        "description": "Bathroom Baseline",
+        "source": "Input Parameters Sheet - Baseline",
+        "assumptions": {
+          "occupancy": "Intermittent \u2192 0.01 ppl/m\u00b2",
+          "activity": "450 Btu/h/person \u2192 132 W/person",
+          "lighting": "0.48 W/ft\u00b2 \u2192 5.17 W/m\u00b2",
+          "equipment": "2.5 W/m\u00b2 (exhaust fan, occasional hair dryers)",
+          "infiltration": "0.0007 m\u00b3/s/m\u00b2 with seasonal schedule (ABC_Infil_Bath_A8)",
+          "ventilation": "0.49 ACH \u2192 0.000332 m\u00b3/s/m\u00b2 (8 ft ceiling)",
+          "shw": "5.35 L/h/m\u00b2 \u2014 70% of measured DHW (showers), from water heater sub-meters"
+        }
+      },
+      "design": {
+        "people": {
+          "people_per_area": 0.01,
+          "radiant_fraction": 0.3,
+          "latent_fraction": 0.5,
+          "occupancy_schedule": "ABC_Bathroom_Occ",
+          "activity_schedule": "ABC_Activity_132W"
+        },
+        "lighting": {
+          "watts_per_area": 5.17,
+          "schedule": "ABC_Bathroom_Occ",
+          "visible_fraction": 0.25,
+          "radiant_fraction": 0.32
+        },
+        "electric_equipment": {
+          "watts_per_area": 2.5,
+          "schedule": "ABC_Bathroom_Occ",
+          "radiant_fraction": 0.5,
+          "latent_fraction": 0.0
+        },
+        "infiltration": {
+          "flow_per_exterior_area": 0.0007,
+          "schedule": "Always On"
+        },
+        "ventilation": {
+          "outdoor_air_per_person": 0.0,
+          "outdoor_air_per_area": 0.000332
+        },
+        "setpoint": {
+          "heating_schedule": "ABC_Heating_23C",
+          "cooling_schedule": "ABC_No_Cooling"
+        },
+        "service_hot_water": {
+          "flow_per_area": 5.35,
+          "target_temperature": 48.9,
+          "sensible_fraction": 0.2,
+          "latent_fraction": 0.05,
+          "schedule": "ABC_SHW_A8"
+        }
+      }
+    },
+    "schedule.ABC_heating_setpoint_23C": {
+      "meta": {
+        "display_name": "ABC_Heating_23C",
+        "description": "Heating setpoint 73\u00b0F (23\u00b0C)",
+        "source": "Input Parameters Sheet - Baseline"
+      },
+      "design": {
+        "schedule_type": "temperature",
+        "hourly_values": [
+          23.0,
+          23.0,
+          23.0,
+          23.0,
+          23.0,
+          23.0,
+          23.0,
+          23.0,
+          23.0,
+          23.0,
+          23.0,
+          23.0,
+          23.0,
+          23.0,
+          23.0,
+          23.0,
+          23.0,
+          23.0,
+          23.0,
+          23.0,
+          23.0,
+          23.0,
+          23.0,
+          23.0
+        ],
+        "weekend_values": [
+          23.0,
+          23.0,
+          23.0,
+          23.0,
+          23.0,
+          23.0,
+          23.0,
+          23.0,
+          23.0,
+          23.0,
+          23.0,
+          23.0,
+          23.0,
+          23.0,
+          23.0,
+          23.0,
+          23.0,
+          23.0,
+          23.0,
+          23.0,
+          23.0,
+          23.0,
+          23.0,
+          23.0
+        ]
+      }
+    },
+    "schedule.ABC_no_cooling": {
+      "meta": {
+        "display_name": "ABC_No_Cooling",
+        "description": "No cooling system - setpoint at 50\u00b0C to ensure never activates",
+        "source": "Input Parameters Sheet - Cooling: NA"
+      },
+      "design": {
+        "schedule_type": "temperature",
+        "hourly_values": [
+          50.0,
+          50.0,
+          50.0,
+          50.0,
+          50.0,
+          50.0,
+          50.0,
+          50.0,
+          50.0,
+          50.0,
+          50.0,
+          50.0,
+          50.0,
+          50.0,
+          50.0,
+          50.0,
+          50.0,
+          50.0,
+          50.0,
+          50.0,
+          50.0,
+          50.0,
+          50.0,
+          50.0
+        ],
+        "weekend_values": [
+          50.0,
+          50.0,
+          50.0,
+          50.0,
+          50.0,
+          50.0,
+          50.0,
+          50.0,
+          50.0,
+          50.0,
+          50.0,
+          50.0,
+          50.0,
+          50.0,
+          50.0,
+          50.0,
+          50.0,
+          50.0,
+          50.0,
+          50.0,
+          50.0,
+          50.0,
+          50.0,
+          50.0
+        ]
+      }
+    },
+    "schedule.ABC_activity_132W": {
+      "meta": {
+        "display_name": "ABC_Activity_132W",
+        "description": "Activity level 450 Btu/h/person = 132 W/person",
+        "source": "Input Parameters Sheet - Baseline"
+      },
+      "design": {
+        "schedule_type": "activity",
+        "hourly_values": [
+          132,
+          132,
+          132,
+          132,
+          132,
+          132,
+          132,
+          132,
+          132,
+          132,
+          132,
+          132,
+          132,
+          132,
+          132,
+          132,
+          132,
+          132,
+          132,
+          132,
+          132,
+          132,
+          132,
+          132
+        ],
+        "weekend_values": [
+          132,
+          132,
+          132,
+          132,
+          132,
+          132,
+          132,
+          132,
+          132,
+          132,
+          132,
+          132,
+          132,
+          132,
+          132,
+          132,
+          132,
+          132,
+          132,
+          132,
+          132,
+          132,
+          132,
+          132
+        ]
+      }
+    },
+    "schedule.ABC_bedroom_occupancy": {
+      "meta": {
+        "display_name": "ABC_Bedroom_Occ",
+        "description": "Student bedroom - sleeping at night, in class 8am-3pm weekdays"
+      },
+      "design": {
+        "schedule_type": "fractional",
+        "hourly_values": [
+          0.95,
+          0.95,
+          0.95,
+          0.95,
+          0.95,
+          0.95,
+          0.7,
+          0.3,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.1,
+          0.05,
+          0.05,
+          0.1,
+          0.2,
+          0.3,
+          0.4,
+          0.5,
+          0.6,
+          0.7,
+          0.85,
+          0.95
+        ],
+        "weekend_values": [
+          0.95,
+          0.95,
+          0.95,
+          0.95,
+          0.95,
+          0.95,
+          0.95,
+          0.9,
+          0.5,
+          0.3,
+          0.2,
+          0.2,
+          0.2,
+          0.2,
+          0.2,
+          0.2,
+          0.3,
+          0.4,
+          0.5,
+          0.7,
+          0.8,
+          0.85,
+          0.9,
+          0.95
+        ]
+      }
+    },
+    "schedule.ABC_livingroom_occupancy": {
+      "meta": {
+        "display_name": "ABC_LivingRoom_Occ",
+        "description": "Student living room/kitchen - sensor-derived fall semester baseline. Replaced generic assumed schedule (peak was 0.90) with PIR sensor values (peak 0.35). Use ABC_LK_Occ_A8 with seasonal #N overrides for annual simulation.",
+        "source": "Derived from A-8-OCC-KT sensor data"
+      },
+      "design": {
+        "schedule_type": "fractional",
+        "hourly_values": [
+          0.1,
+          0.1,
+          0.1,
+          0.1,
+          0.1,
+          0.0,
+          0.0,
+          0.15,
+          0.15,
+          0.15,
+          0.15,
+          0.2,
+          0.2,
+          0.2,
+          0.2,
+          0.2,
+          0.2,
+          0.3,
+          0.3,
+          0.3,
+          0.3,
+          0.25,
+          0.25,
+          0.25
+        ],
+        "weekend_values": [
+          0.15,
+          0.15,
+          0.15,
+          0.15,
+          0.15,
+          0.05,
+          0.05,
+          0.05,
+          0.1,
+          0.1,
+          0.1,
+          0.3,
+          0.3,
+          0.35,
+          0.35,
+          0.35,
+          0.35,
+          0.35,
+          0.35,
+          0.35,
+          0.35,
+          0.3,
+          0.3,
+          0.3
+        ]
+      }
+    },
+    "schedule.ABC_bathroom_occupancy": {
+      "meta": {
+        "display_name": "ABC_Bathroom_Occ",
+        "description": "Student bathroom - brief peaks morning and evening routines"
+      },
+      "design": {
+        "schedule_type": "fractional",
+        "hourly_values": [
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.1,
+          0.5,
+          0.7,
+          0.2,
+          0.05,
+          0.05,
+          0.05,
+          0.1,
+          0.05,
+          0.05,
+          0.05,
+          0.1,
+          0.2,
+          0.3,
+          0.4,
+          0.5,
+          0.4,
+          0.2,
+          0.1
+        ],
+        "weekend_values": [
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.1,
+          0.2,
+          0.4,
+          0.3,
+          0.2,
+          0.15,
+          0.15,
+          0.1,
+          0.1,
+          0.1,
+          0.15,
+          0.2,
+          0.3,
+          0.4,
+          0.5,
+          0.4,
+          0.2,
+          0.1
+        ]
+      }
+    },
+    "schedule.ABC_shw_residential": {
+      "meta": {
+        "display_name": "ABC_SHW_Residential",
+        "description": "Hot water usage pattern - morning and evening peaks"
+      },
+      "design": {
+        "schedule_type": "fractional",
+        "hourly_values": [
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.1,
+          0.6,
+          0.8,
+          0.4,
+          0.2,
+          0.15,
+          0.2,
+          0.3,
+          0.15,
+          0.1,
+          0.15,
+          0.2,
+          0.4,
+          0.6,
+          0.5,
+          0.4,
+          0.3,
+          0.15,
+          0.1
+        ],
+        "weekend_values": [
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.1,
+          0.3,
+          0.5,
+          0.6,
+          0.4,
+          0.3,
+          0.3,
+          0.25,
+          0.2,
+          0.2,
+          0.3,
+          0.5,
+          0.6,
+          0.5,
+          0.4,
+          0.3,
+          0.2,
+          0.1
+        ]
+      }
+    },
+    "schedule.ABC_LK_Occ_A8": {
+      "meta": {
+        "display_name": "ABC_LK_Occ_A8",
+        "description": "Living-kitchen occupancy from motion sensor A-8-OCC-KT. Base = fall semester (Sep-Dec). Detection rate used directly as occupancy fraction (transient-use space, no sleeping interpretation). Max 2 students/unit.",
+        "source": "A-8-OCC-KT motion sensor data (10 monthly CSVs, ~88K readings)"
+      },
+      "design": {
+        "schedule_type": "fractional",
+        "hourly_values": [
+          0.1,
+          0.1,
+          0.1,
+          0.1,
+          0.1,
+          0.0,
+          0.0,
+          0.15,
+          0.15,
+          0.15,
+          0.15,
+          0.2,
+          0.2,
+          0.2,
+          0.2,
+          0.2,
+          0.2,
+          0.3,
+          0.3,
+          0.3,
+          0.3,
+          0.25,
+          0.25,
+          0.25
+        ],
+        "weekend_values": [
+          0.15,
+          0.15,
+          0.15,
+          0.15,
+          0.15,
+          0.05,
+          0.05,
+          0.05,
+          0.1,
+          0.1,
+          0.1,
+          0.3,
+          0.3,
+          0.35,
+          0.35,
+          0.35,
+          0.35,
+          0.35,
+          0.35,
+          0.35,
+          0.35,
+          0.3,
+          0.3,
+          0.3
+        ]
+      }
+    },
+    "schedule.ABC_LK_Occ_A8#1": {
+      "meta": {
+        "display_name": "ABC_LK_Occ_A8_Summer",
+        "description": "Summer vacancy (Jul-Aug). Overridden to zero for consistency with bedroom vacancy. Raw KT sensor showed ~45% detection but bedrooms were vacant \u2014 likely maintenance/cleaning."
+      },
+      "design": {
+        "schedule_type": "fractional",
+        "hourly_values": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "weekend_values": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "start_date": [
+          5,
+          11
+        ],
+        "end_date": [
+          8,
+          20
+        ]
+      }
+    },
+    "schedule.ABC_LK_Occ_A8#2": {
+      "meta": {
+        "display_name": "ABC_LK_Occ_A8_WinterBreak",
+        "description": "Winter break (Dec 15 - Jan 15). Near-zero sensor activity \u2014 students away for holidays. Overridden to zero, consistent with bedroom vacancy determination."
+      },
+      "design": {
+        "schedule_type": "fractional",
+        "hourly_values": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "weekend_values": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "start_date": [
+          12,
+          15
+        ],
+        "end_date": [
+          1,
+          15
+        ]
+      }
+    },
+    "schedule.ABC_Bathroom_Occ_A8": {
+      "meta": {
+        "display_name": "ABC_Bathroom_Occ_A8",
+        "description": "Bathroom occupancy from A-8 PIR motion sensor (Jul 2023 - Apr 2024). Academic semester pattern excluding winter break. Fractional values derived from visit probability and duration scaling.",
+        "source": "A-8-OCC-FD motion sensor, Syracuse University apartment",
+        "derivation": "visit_probability * duration_factor, simplified to 0.01 resolution",
+        "sensor_period": "Oct 2023 - Apr 2024 (excl. Dec 16 - Jan 15 winter break)"
+      },
+      "design": {
+        "schedule_type": "fractional",
+        "hourly_values": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.05,
+          0.03,
+          0.06,
+          0.05,
+          0.04,
+          0.05,
+          0.05,
+          0.03,
+          0.04,
+          0.04,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.03,
+          0.02,
+          0.02
+        ],
+        "weekend_values": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.02,
+          0.04,
+          0.07,
+          0.05,
+          0.05,
+          0.07,
+          0.05,
+          0.05,
+          0.03,
+          0.02,
+          0.03,
+          0.0,
+          0.0
+        ]
+      }
+    },
+    "schedule.ABC_Bathroom_Occ_A8#1": {
+      "meta": {
+        "display_name": "ABC_Bathroom_Occ_A8_Summer",
+        "description": "Summer pattern (Jul-Aug). Higher activity, earlier mornings, more daytime use. Low-res sensor period - pattern reliable, absolute values less certain.",
+        "source": "A-8-OCC-FD motion sensor"
+      },
+      "design": {
+        "schedule_type": "fractional",
+        "hourly_values": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.01,
+          0.05,
+          0.06,
+          0.05,
+          0.07,
+          0.07,
+          0.09,
+          0.06,
+          0.04,
+          0.06,
+          0.03,
+          0.03,
+          0.03,
+          0.02,
+          0.01,
+          0.02,
+          0.01,
+          0.01
+        ],
+        "weekend_values": [
+          0.01,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.01,
+          0.01,
+          0.04,
+          0.06,
+          0.06,
+          0.03,
+          0.03,
+          0.05,
+          0.04,
+          0.01,
+          0.04,
+          0.03,
+          0.01,
+          0.04,
+          0.03,
+          0.03,
+          0.0,
+          0.01
+        ],
+        "start_date": [
+          5,
+          11
+        ],
+        "end_date": [
+          8,
+          20
+        ]
+      }
+    },
+    "schedule.ABC_Bathroom_Occ_A8#2": {
+      "meta": {
+        "display_name": "ABC_Bathroom_Occ_A8_Fall",
+        "description": "Fall semester pattern (Sep-Dec 15). Strongest weekday morning peak at 9am. Heavy evening cluster 5-8pm. Most representative academic semester pattern.",
+        "source": "A-8-OCC-FD motion sensor"
+      },
+      "design": {
+        "schedule_type": "fractional",
+        "hourly_values": [
+          0.02,
+          0.02,
+          0.01,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.06,
+          0.06,
+          0.1,
+          0.05,
+          0.04,
+          0.06,
+          0.05,
+          0.04,
+          0.07,
+          0.08,
+          0.07,
+          0.09,
+          0.08,
+          0.1,
+          0.06,
+          0.04,
+          0.02
+        ],
+        "weekend_values": [
+          0.01,
+          0.0,
+          0.02,
+          0.01,
+          0.01,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.01,
+          0.01,
+          0.05,
+          0.09,
+          0.1,
+          0.08,
+          0.06,
+          0.09,
+          0.09,
+          0.08,
+          0.05,
+          0.04,
+          0.04,
+          0.03,
+          0.01
+        ],
+        "start_date": [
+          9,
+          1
+        ],
+        "end_date": [
+          12,
+          15
+        ]
+      }
+    },
+    "schedule.ABC_Bathroom_Occ_A8#3": {
+      "meta": {
+        "display_name": "ABC_Bathroom_Occ_A8_WinterBreak",
+        "description": "Winter break vacancy pattern (Dec 16 - Jan 15). Near-zero occupancy. 20-day continuous vacancy streak (Dec 23 - Jan 11). Use as multiplier = 0 or standalone.",
+        "source": "A-8-OCC-FD motion sensor"
+      },
+      "design": {
+        "schedule_type": "fractional",
+        "hourly_values": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "weekend_values": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "start_date": [
+          12,
+          16
+        ],
+        "end_date": [
+          1,
+          15
+        ]
+      }
+    },
+    "schedule.ABC_Bedroom_Occ_A8": {
+      "meta": {
+        "display_name": "ABC_Bedroom_Occ_A8",
+        "description": "Student bedroom occupancy from PIR sensor A-8 BRW. Base = fall semester (most representative). Most active period. Strong morning peak (0.95-0.96 at 07-08h), slower departure (0.82 at 09h), moderate evening return (0.32-0.41).",
+        "source": "PIR motion sensor CSV files, Unit A-8 BRW, Jul 2023 - Apr 2024",
+        "methodology": "Block schedule interpretation of hourly motion-detection fractions. Nighttime = occupied (sleeping). Daytime blocks assigned based on motion decay/recovery pattern per season.",
+        "data_summary": {
+          "fall_weekdays": 78,
+          "fall_weekends": 32,
+          "spring_weekdays": 77,
+          "spring_weekends": 30,
+          "summer_days": 56,
+          "winter_break_days": 26
+        }
+      },
+      "design": {
+        "schedule_type": "fractional",
+        "hourly_values": [
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          0.5,
+          0.5,
+          0.5,
+          0.25,
+          0.25,
+          0.25,
+          0.25,
+          0.25,
+          0.5,
+          0.5,
+          0.5,
+          0.75,
+          0.75,
+          0.75,
+          1.0
+        ],
+        "weekend_values": [
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          0.5,
+          0.5,
+          0.5,
+          0.25,
+          0.25,
+          0.25,
+          0.5,
+          0.5,
+          0.5,
+          0.5,
+          1.0
+        ]
+      }
+    },
+    "schedule.ABC_Bedroom_Occ_A8#1": {
+      "meta": {
+        "display_name": "ABC_Bedroom_Occ_A8_Summer",
+        "description": "Pre-semester, essentially unoccupied (avg motion ~0.12 flat, no diurnal pattern)"
+      },
+      "design": {
+        "schedule_type": "fractional",
+        "hourly_values": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "weekend_values": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "start_date": [
+          5,
+          11
+        ],
+        "end_date": [
+          8,
+          20
+        ]
+      }
+    },
+    "schedule.ABC_Bedroom_Occ_A8#2": {
+      "meta": {
+        "display_name": "ABC_Bedroom_Occ_A8_WinterBreak",
+        "description": "Vacant. Weekday motion 0.00 across all hours. Negligible weekend signal from ~2 days."
+      },
+      "design": {
+        "schedule_type": "fractional",
+        "hourly_values": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "weekend_values": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "start_date": [
+          12,
+          20
+        ],
+        "end_date": [
+          1,
+          14
+        ]
+      }
+    },
+    "schedule.ABC_Bedroom_Occ_A8#3": {
+      "meta": {
+        "display_name": "ABC_Bedroom_Occ_A8_Spring",
+        "description": "Active but lower than fall. Faster morning departure (drops at 08h), deeper daytime trough (0.08 at 16h), weaker evening return (0.13-0.25)."
+      },
+      "design": {
+        "schedule_type": "fractional",
+        "hourly_values": [
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          0.75,
+          0.25,
+          0.25,
+          0.25,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.25,
+          0.25,
+          0.25,
+          0.5,
+          0.5,
+          0.5,
+          1.0
+        ],
+        "weekend_values": [
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          0.75,
+          0.5,
+          0.5,
+          0.0,
+          0.0,
+          0.0,
+          0.25,
+          0.25,
+          0.25,
+          0.75,
+          1.0
+        ],
+        "start_date": [
+          1,
+          15
+        ],
+        "end_date": [
+          5,
+          10
+        ]
+      }
+    },
+    "schedule.ABC_LK_Occ_A8#3": {
+      "meta": {
+        "display_name": "ABC_LK_Occ_A8_Spring",
+        "description": "Spring semester (Jan 15 - Apr 30). Lower than fall across all hours \u2014 consistent with bedroom and bathroom declining spring trend. Sensor-derived, detection rate as direct occupancy fraction.",
+        "source": "A-8-OCC-KT PIR sensor, Jan-Apr 2024"
+      },
+      "design": {
+        "schedule_type": "fractional",
+        "hourly_values": [
+          0.1,
+          0.1,
+          0.1,
+          0.1,
+          0.1,
+          0.0,
+          0.0,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.15,
+          0.15,
+          0.15,
+          0.05,
+          0.05,
+          0.05,
+          0.15,
+          0.15,
+          0.15,
+          0.15,
+          0.15,
+          0.15,
+          0.15
+        ],
+        "weekend_values": [
+          0.15,
+          0.15,
+          0.15,
+          0.15,
+          0.15,
+          0.0,
+          0.0,
+          0.0,
+          0.05,
+          0.05,
+          0.05,
+          0.0,
+          0.0,
+          0.2,
+          0.2,
+          0.2,
+          0.2,
+          0.2,
+          0.2,
+          0.2,
+          0.2,
+          0.15,
+          0.15,
+          0.15
+        ],
+        "start_date": [
+          1,
+          15
+        ],
+        "end_date": [
+          5,
+          10
+        ]
+      }
+    },
+    "schedule.ABC_SHW_A8": {
+      "meta": {
+        "display_name": "ABC_SHW_A8",
+        "description": "Service hot water usage pattern \u2014 morning and evening peaks. Base = fall semester academic pattern. Derived from measured DHW energy (Water 1 + Water 2 meters, 15,668 kWh/yr building). Use with seasonal #N overrides for annual simulation.",
+        "source": "Back-calculated from AAA.csv water heater sub-meters, 70/30 bath/kitchen split"
+      },
+      "design": {
+        "schedule_type": "fractional",
+        "hourly_values": [
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.1,
+          0.6,
+          0.8,
+          0.4,
+          0.2,
+          0.15,
+          0.2,
+          0.3,
+          0.15,
+          0.1,
+          0.15,
+          0.2,
+          0.4,
+          0.6,
+          0.5,
+          0.4,
+          0.3,
+          0.15,
+          0.1
+        ],
+        "weekend_values": [
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.1,
+          0.3,
+          0.5,
+          0.6,
+          0.4,
+          0.3,
+          0.3,
+          0.25,
+          0.2,
+          0.2,
+          0.3,
+          0.5,
+          0.6,
+          0.5,
+          0.4,
+          0.3,
+          0.2,
+          0.1
+        ]
+      }
+    },
+    "schedule.ABC_SHW_A8#1": {
+      "meta": {
+        "display_name": "ABC_SHW_A8_Summer",
+        "description": "Summer vacancy (May 1 - Aug 31). Standby losses only \u2014 students away, no shower/kitchen use. Aligned with bedroom and LK summer vacancy overrides."
+      },
+      "design": {
+        "schedule_type": "fractional",
+        "hourly_values": [
+          0.02,
+          0.02,
+          0.02,
+          0.02,
+          0.02,
+          0.02,
+          0.02,
+          0.02,
+          0.02,
+          0.02,
+          0.02,
+          0.02,
+          0.02,
+          0.02,
+          0.02,
+          0.02,
+          0.02,
+          0.02,
+          0.02,
+          0.02,
+          0.02,
+          0.02,
+          0.02,
+          0.02
+        ],
+        "weekend_values": [
+          0.02,
+          0.02,
+          0.02,
+          0.02,
+          0.02,
+          0.02,
+          0.02,
+          0.02,
+          0.02,
+          0.02,
+          0.02,
+          0.02,
+          0.02,
+          0.02,
+          0.02,
+          0.02,
+          0.02,
+          0.02,
+          0.02,
+          0.02,
+          0.02,
+          0.02,
+          0.02,
+          0.02
+        ],
+        "start_date": [
+          5,
+          11
+        ],
+        "end_date": [
+          8,
+          20
+        ]
+      }
+    },
+    "schedule.ABC_SHW_A8#2": {
+      "meta": {
+        "display_name": "ABC_SHW_A8_WinterBreak",
+        "description": "Winter break vacancy (Dec 15 - Jan 15). Zero draw \u2014 students away for holidays. Aligned with bedroom and LK winter break overrides."
+      },
+      "design": {
+        "schedule_type": "fractional",
+        "hourly_values": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "weekend_values": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "start_date": [
+          12,
+          15
+        ],
+        "end_date": [
+          1,
+          15
+        ]
+      }
+    },
+    "schedule.ABC_Infil_Bed_A8": {
+      "meta": {
+        "display_name": "ABC_Infil_Bed_A8",
+        "description": "Combined occupancy \u00d7 seasonal \u0394T infiltration schedule for Bed. Base = shoulder (Oct-Nov, occ \u00d7 0.61). Design rate 0.0007 m\u00b3/s/m\u00b2.",
+        "source": "Occupancy from PIR sensor data; seasonal \u0394T^0.65 from Sherman & Grimsrud (1980)"
+      },
+      "design": {
+        "schedule_type": "fractional",
+        "hourly_values": [
+          0.61,
+          0.61,
+          0.61,
+          0.61,
+          0.61,
+          0.61,
+          0.61,
+          0.61,
+          0.61,
+          0.305,
+          0.305,
+          0.305,
+          0.152,
+          0.152,
+          0.152,
+          0.152,
+          0.152,
+          0.305,
+          0.305,
+          0.305,
+          0.458,
+          0.458,
+          0.458,
+          0.61
+        ],
+        "weekend_values": [
+          0.61,
+          0.61,
+          0.61,
+          0.61,
+          0.61,
+          0.61,
+          0.61,
+          0.61,
+          0.61,
+          0.61,
+          0.61,
+          0.61,
+          0.61,
+          0.305,
+          0.305,
+          0.305,
+          0.152,
+          0.152,
+          0.152,
+          0.305,
+          0.305,
+          0.305,
+          0.305,
+          0.61
+        ]
+      }
+    },
+    "schedule.ABC_Infil_Bed_A8#1": {
+      "meta": {
+        "display_name": "ABC_Infil_Bed_A8_WinterBreak",
+        "description": "Winter break vacancy. Minimal crack leakage only."
+      },
+      "design": {
+        "schedule_type": "fractional",
+        "hourly_values": [
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05
+        ],
+        "weekend_values": [
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05
+        ],
+        "start_date": [
+          12,
+          15
+        ],
+        "end_date": [
+          1,
+          14
+        ]
+      }
+    },
+    "schedule.ABC_Infil_Bed_A8#2": {
+      "meta": {
+        "display_name": "ABC_Infil_Bed_A8_Winter",
+        "description": "Winter semester. Full \u0394T effect (occ \u00d7 1.0)."
+      },
+      "design": {
+        "schedule_type": "fractional",
+        "hourly_values": [
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          0.5,
+          0.5,
+          0.5,
+          0.25,
+          0.25,
+          0.25,
+          0.25,
+          0.25,
+          0.5,
+          0.5,
+          0.5,
+          0.75,
+          0.75,
+          0.75,
+          1.0
+        ],
+        "weekend_values": [
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          0.5,
+          0.5,
+          0.5,
+          0.25,
+          0.25,
+          0.25,
+          0.5,
+          0.5,
+          0.5,
+          0.5,
+          1.0
+        ],
+        "start_date": [
+          1,
+          15
+        ],
+        "end_date": [
+          3,
+          31
+        ]
+      }
+    },
+    "schedule.ABC_Infil_Bed_A8#3": {
+      "meta": {
+        "display_name": "ABC_Infil_Bed_A8_SpringShoulder",
+        "description": "Spring shoulder. Moderate \u0394T (occ \u00d7 0.61)."
+      },
+      "design": {
+        "schedule_type": "fractional",
+        "hourly_values": [
+          0.61,
+          0.61,
+          0.61,
+          0.61,
+          0.61,
+          0.61,
+          0.61,
+          0.61,
+          0.61,
+          0.305,
+          0.305,
+          0.305,
+          0.152,
+          0.152,
+          0.152,
+          0.152,
+          0.152,
+          0.305,
+          0.305,
+          0.305,
+          0.458,
+          0.458,
+          0.458,
+          0.61
+        ],
+        "weekend_values": [
+          0.61,
+          0.61,
+          0.61,
+          0.61,
+          0.61,
+          0.61,
+          0.61,
+          0.61,
+          0.61,
+          0.61,
+          0.61,
+          0.61,
+          0.61,
+          0.305,
+          0.305,
+          0.305,
+          0.152,
+          0.152,
+          0.152,
+          0.305,
+          0.305,
+          0.305,
+          0.305,
+          0.61
+        ],
+        "start_date": [
+          4,
+          1
+        ],
+        "end_date": [
+          5,
+          10
+        ]
+      }
+    },
+    "schedule.ABC_Infil_Bed_A8#4": {
+      "meta": {
+        "display_name": "ABC_Infil_Bed_A8_SummerVacancy",
+        "description": "Summer vacancy. Minimal crack leakage only."
+      },
+      "design": {
+        "schedule_type": "fractional",
+        "hourly_values": [
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05
+        ],
+        "weekend_values": [
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05
+        ],
+        "start_date": [
+          5,
+          11
+        ],
+        "end_date": [
+          8,
+          20
+        ]
+      }
+    },
+    "schedule.ABC_Infil_Bed_A8#5": {
+      "meta": {
+        "display_name": "ABC_Infil_Bed_A8_EarlyFall",
+        "description": "Early fall. Low \u0394T, summer-like conditions (occ \u00d7 0.22)."
+      },
+      "design": {
+        "schedule_type": "fractional",
+        "hourly_values": [
+          0.22,
+          0.22,
+          0.22,
+          0.22,
+          0.22,
+          0.22,
+          0.22,
+          0.22,
+          0.22,
+          0.11,
+          0.11,
+          0.11,
+          0.055,
+          0.055,
+          0.055,
+          0.055,
+          0.055,
+          0.11,
+          0.11,
+          0.11,
+          0.165,
+          0.165,
+          0.165,
+          0.22
+        ],
+        "weekend_values": [
+          0.22,
+          0.22,
+          0.22,
+          0.22,
+          0.22,
+          0.22,
+          0.22,
+          0.22,
+          0.22,
+          0.22,
+          0.22,
+          0.22,
+          0.22,
+          0.11,
+          0.11,
+          0.11,
+          0.055,
+          0.055,
+          0.055,
+          0.11,
+          0.11,
+          0.11,
+          0.11,
+          0.22
+        ],
+        "start_date": [
+          8,
+          21
+        ],
+        "end_date": [
+          9,
+          30
+        ]
+      }
+    },
+    "schedule.ABC_Infil_LK_A8": {
+      "meta": {
+        "display_name": "ABC_Infil_LK_A8",
+        "description": "Combined occupancy \u00d7 seasonal \u0394T infiltration schedule for LK. Base = shoulder (Oct-Nov, occ \u00d7 0.61). Design rate 0.0007 m\u00b3/s/m\u00b2.",
+        "source": "Occupancy from PIR sensor data; seasonal \u0394T^0.65 from Sherman & Grimsrud (1980)"
+      },
+      "design": {
+        "schedule_type": "fractional",
+        "hourly_values": [
+          0.061,
+          0.061,
+          0.061,
+          0.061,
+          0.061,
+          0.0,
+          0.0,
+          0.091,
+          0.091,
+          0.091,
+          0.091,
+          0.122,
+          0.122,
+          0.122,
+          0.122,
+          0.122,
+          0.122,
+          0.183,
+          0.183,
+          0.183,
+          0.183,
+          0.152,
+          0.152,
+          0.152
+        ],
+        "weekend_values": [
+          0.091,
+          0.091,
+          0.091,
+          0.091,
+          0.091,
+          0.03,
+          0.03,
+          0.03,
+          0.061,
+          0.061,
+          0.061,
+          0.183,
+          0.183,
+          0.213,
+          0.213,
+          0.213,
+          0.213,
+          0.213,
+          0.213,
+          0.213,
+          0.213,
+          0.183,
+          0.183,
+          0.183
+        ]
+      }
+    },
+    "schedule.ABC_Infil_LK_A8#1": {
+      "meta": {
+        "display_name": "ABC_Infil_LK_A8_WinterBreak",
+        "description": "Winter break vacancy. Minimal crack leakage only."
+      },
+      "design": {
+        "schedule_type": "fractional",
+        "hourly_values": [
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05
+        ],
+        "weekend_values": [
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05
+        ],
+        "start_date": [
+          12,
+          15
+        ],
+        "end_date": [
+          1,
+          14
+        ]
+      }
+    },
+    "schedule.ABC_Infil_LK_A8#2": {
+      "meta": {
+        "display_name": "ABC_Infil_LK_A8_Winter",
+        "description": "Winter semester. Full \u0394T effect (occ \u00d7 1.0)."
+      },
+      "design": {
+        "schedule_type": "fractional",
+        "hourly_values": [
+          0.1,
+          0.1,
+          0.1,
+          0.1,
+          0.1,
+          0.0,
+          0.0,
+          0.15,
+          0.15,
+          0.15,
+          0.15,
+          0.2,
+          0.2,
+          0.2,
+          0.2,
+          0.2,
+          0.2,
+          0.3,
+          0.3,
+          0.3,
+          0.3,
+          0.25,
+          0.25,
+          0.25
+        ],
+        "weekend_values": [
+          0.15,
+          0.15,
+          0.15,
+          0.15,
+          0.15,
+          0.05,
+          0.05,
+          0.05,
+          0.1,
+          0.1,
+          0.1,
+          0.3,
+          0.3,
+          0.35,
+          0.35,
+          0.35,
+          0.35,
+          0.35,
+          0.35,
+          0.35,
+          0.35,
+          0.3,
+          0.3,
+          0.3
+        ],
+        "start_date": [
+          1,
+          15
+        ],
+        "end_date": [
+          3,
+          31
+        ]
+      }
+    },
+    "schedule.ABC_Infil_LK_A8#3": {
+      "meta": {
+        "display_name": "ABC_Infil_LK_A8_SpringShoulder",
+        "description": "Spring shoulder. Moderate \u0394T (occ \u00d7 0.61)."
+      },
+      "design": {
+        "schedule_type": "fractional",
+        "hourly_values": [
+          0.061,
+          0.061,
+          0.061,
+          0.061,
+          0.061,
+          0.0,
+          0.0,
+          0.091,
+          0.091,
+          0.091,
+          0.091,
+          0.122,
+          0.122,
+          0.122,
+          0.122,
+          0.122,
+          0.122,
+          0.183,
+          0.183,
+          0.183,
+          0.183,
+          0.152,
+          0.152,
+          0.152
+        ],
+        "weekend_values": [
+          0.091,
+          0.091,
+          0.091,
+          0.091,
+          0.091,
+          0.03,
+          0.03,
+          0.03,
+          0.061,
+          0.061,
+          0.061,
+          0.183,
+          0.183,
+          0.213,
+          0.213,
+          0.213,
+          0.213,
+          0.213,
+          0.213,
+          0.213,
+          0.213,
+          0.183,
+          0.183,
+          0.183
+        ],
+        "start_date": [
+          4,
+          1
+        ],
+        "end_date": [
+          5,
+          10
+        ]
+      }
+    },
+    "schedule.ABC_Infil_LK_A8#4": {
+      "meta": {
+        "display_name": "ABC_Infil_LK_A8_SummerVacancy",
+        "description": "Summer vacancy. Minimal crack leakage only."
+      },
+      "design": {
+        "schedule_type": "fractional",
+        "hourly_values": [
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05
+        ],
+        "weekend_values": [
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05
+        ],
+        "start_date": [
+          5,
+          11
+        ],
+        "end_date": [
+          8,
+          20
+        ]
+      }
+    },
+    "schedule.ABC_Infil_LK_A8#5": {
+      "meta": {
+        "display_name": "ABC_Infil_LK_A8_EarlyFall",
+        "description": "Early fall. Low \u0394T, summer-like conditions (occ \u00d7 0.22)."
+      },
+      "design": {
+        "schedule_type": "fractional",
+        "hourly_values": [
+          0.022,
+          0.022,
+          0.022,
+          0.022,
+          0.022,
+          0.0,
+          0.0,
+          0.033,
+          0.033,
+          0.033,
+          0.033,
+          0.044,
+          0.044,
+          0.044,
+          0.044,
+          0.044,
+          0.044,
+          0.066,
+          0.066,
+          0.066,
+          0.066,
+          0.055,
+          0.055,
+          0.055
+        ],
+        "weekend_values": [
+          0.033,
+          0.033,
+          0.033,
+          0.033,
+          0.033,
+          0.011,
+          0.011,
+          0.011,
+          0.022,
+          0.022,
+          0.022,
+          0.066,
+          0.066,
+          0.077,
+          0.077,
+          0.077,
+          0.077,
+          0.077,
+          0.077,
+          0.077,
+          0.077,
+          0.066,
+          0.066,
+          0.066
+        ],
+        "start_date": [
+          8,
+          21
+        ],
+        "end_date": [
+          9,
+          30
+        ]
+      }
+    },
+    "schedule.ABC_Infil_Bath_A8": {
+      "meta": {
+        "display_name": "ABC_Infil_Bath_A8",
+        "description": "Combined occupancy \u00d7 seasonal \u0394T infiltration schedule for Bath. Base = shoulder (Oct-Nov, occ \u00d7 0.61). Design rate 0.0007 m\u00b3/s/m\u00b2.",
+        "source": "Occupancy from PIR sensor data; seasonal \u0394T^0.65 from Sherman & Grimsrud (1980)"
+      },
+      "design": {
+        "schedule_type": "fractional",
+        "hourly_values": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.03,
+          0.018,
+          0.037,
+          0.03,
+          0.024,
+          0.03,
+          0.03,
+          0.018,
+          0.024,
+          0.024,
+          0.03,
+          0.03,
+          0.03,
+          0.03,
+          0.018,
+          0.012,
+          0.012
+        ],
+        "weekend_values": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.012,
+          0.024,
+          0.043,
+          0.03,
+          0.03,
+          0.043,
+          0.03,
+          0.03,
+          0.018,
+          0.012,
+          0.018,
+          0.0,
+          0.0
+        ]
+      }
+    },
+    "schedule.ABC_Infil_Bath_A8#1": {
+      "meta": {
+        "display_name": "ABC_Infil_Bath_A8_WinterBreak",
+        "description": "Winter break vacancy. Minimal crack leakage only."
+      },
+      "design": {
+        "schedule_type": "fractional",
+        "hourly_values": [
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05
+        ],
+        "weekend_values": [
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05
+        ],
+        "start_date": [
+          12,
+          15
+        ],
+        "end_date": [
+          1,
+          14
+        ]
+      }
+    },
+    "schedule.ABC_Infil_Bath_A8#2": {
+      "meta": {
+        "display_name": "ABC_Infil_Bath_A8_Winter",
+        "description": "Winter semester. Full \u0394T effect (occ \u00d7 1.0)."
+      },
+      "design": {
+        "schedule_type": "fractional",
+        "hourly_values": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.05,
+          0.03,
+          0.06,
+          0.05,
+          0.04,
+          0.05,
+          0.05,
+          0.03,
+          0.04,
+          0.04,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.03,
+          0.02,
+          0.02
+        ],
+        "weekend_values": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.02,
+          0.04,
+          0.07,
+          0.05,
+          0.05,
+          0.07,
+          0.05,
+          0.05,
+          0.03,
+          0.02,
+          0.03,
+          0.0,
+          0.0
+        ],
+        "start_date": [
+          1,
+          15
+        ],
+        "end_date": [
+          3,
+          31
+        ]
+      }
+    },
+    "schedule.ABC_Infil_Bath_A8#3": {
+      "meta": {
+        "display_name": "ABC_Infil_Bath_A8_SpringShoulder",
+        "description": "Spring shoulder. Moderate \u0394T (occ \u00d7 0.61)."
+      },
+      "design": {
+        "schedule_type": "fractional",
+        "hourly_values": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.03,
+          0.018,
+          0.037,
+          0.03,
+          0.024,
+          0.03,
+          0.03,
+          0.018,
+          0.024,
+          0.024,
+          0.03,
+          0.03,
+          0.03,
+          0.03,
+          0.018,
+          0.012,
+          0.012
+        ],
+        "weekend_values": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.012,
+          0.024,
+          0.043,
+          0.03,
+          0.03,
+          0.043,
+          0.03,
+          0.03,
+          0.018,
+          0.012,
+          0.018,
+          0.0,
+          0.0
+        ],
+        "start_date": [
+          4,
+          1
+        ],
+        "end_date": [
+          5,
+          10
+        ]
+      }
+    },
+    "schedule.ABC_Infil_Bath_A8#4": {
+      "meta": {
+        "display_name": "ABC_Infil_Bath_A8_SummerVacancy",
+        "description": "Summer vacancy. Minimal crack leakage only."
+      },
+      "design": {
+        "schedule_type": "fractional",
+        "hourly_values": [
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05
+        ],
+        "weekend_values": [
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05
+        ],
+        "start_date": [
+          5,
+          11
+        ],
+        "end_date": [
+          8,
+          20
+        ]
+      }
+    },
+    "schedule.ABC_Infil_Bath_A8#5": {
+      "meta": {
+        "display_name": "ABC_Infil_Bath_A8_EarlyFall",
+        "description": "Early fall. Low \u0394T, summer-like conditions (occ \u00d7 0.22)."
+      },
+      "design": {
+        "schedule_type": "fractional",
+        "hourly_values": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.011,
+          0.007,
+          0.013,
+          0.011,
+          0.009,
+          0.011,
+          0.011,
+          0.007,
+          0.009,
+          0.009,
+          0.011,
+          0.011,
+          0.011,
+          0.011,
+          0.007,
+          0.004,
+          0.004
+        ],
+        "weekend_values": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.004,
+          0.009,
+          0.015,
+          0.011,
+          0.011,
+          0.015,
+          0.011,
+          0.011,
+          0.007,
+          0.004,
+          0.007,
+          0.0,
+          0.0
+        ],
+        "start_date": [
+          8,
+          21
+        ],
+        "end_date": [
+          9,
+          30
+        ]
+      }
+    },
+    "enclosure.ABC_ground_slab_baseline": {
+      "meta": {
+        "display_name": "ABC_Ground_Slab_Bare_Concrete",
+        "description": "1972 temporary-use ground slab \u2014 bare 6in heavyweight concrete, no insulation, no carpet. Replaces HB default 'Typical Insulated Carpeted 8in Slab Floor-R5' (R-5.7 IP).",
+        "r_value_ip": 0.98,
+        "r_value_si": 0.173,
+        "u_value_ip": 1.02,
+        "source": "Building history \u2014 originally temporary construction worker housing, 1972",
+        "idf_replaces": "Typical Insulated Carpeted 8in Slab Floor-R5",
+        "assumptions": {
+          "thickness": "0.15m (6 in.) bare concrete slab on grade",
+          "conductivity": "0.867 W/m\u00b7K (effective, includes surface film resistances)",
+          "density": "2240 kg/m\u00b3 heavyweight concrete",
+          "specific_heat": "900 J/kg\u00b7K typical"
+        }
+      },
+      "design": {
+        "thermal": {
+          "layers": [
+            {
+              "type": "EnergyMaterial",
+              "thickness": 0.15,
+              "conductivity": 0.867,
+              "density": 2240,
+              "specific_heat": 900,
+              "roughness": "MediumRough",
+              "thermal_absorptance": 0.9,
+              "solar_absorptance": 0.7,
+              "visible_absorptance": 0.7
+            }
+          ]
+        }
+      }
+    }
+  },
+  "building_info": {
+    "name": "Syracuse University Apartment Buildings A & B",
+    "location": "Syracuse, NY, USA",
+    "climate_zone": "Cold (ASHRAE 5A)",
+    "year_built": "1972-1973",
+    "floor_area_m2": 608.42,
+    "floor_area_sf": 6549,
+    "floor_to_floor_height_ft": 8,
+    "floor_to_floor_height_m": 2.44,
+    "units_per_building": 8,
+    "unit_type": "Two-bedroom duplex",
+    "occupancy": "Student housing (Aug-May)",
+    "source": "Input Parameters Sheet - Baseline"
+  },
+  "hvac_baseline": {
+    "heating_system": "Electric resistance baseboard",
+    "heating_cop": 1.0,
+    "heating_setpoint_f": 73,
+    "heating_setpoint_c": 23.0,
+    "cooling_system": "None (NA)",
+    "cooling_setpoint_c": 50.0,
+    "ventilation": "Exhaust only",
+    "ventilation_bathroom_cfm": 53,
+    "ventilation_kitchen_cfm": 128,
+    "ventilation_equivalent_cfm": 23,
+    "mechanical_oa": false,
+    "recommended_hb_system": {
+      "category": "HeatCool: Baseboard",
+      "equipment_type": "ElectricBaseboard",
+      "description": "Heating-only, COP=1.0, no cooling"
+    }
+  },
+  "dhw_baseline": {
+    "system_type": "Electric storage water heater",
+    "efficiency_cop": 1.0,
+    "setpoint_f": 120,
+    "setpoint_c": 48.9,
+    "storage_capacity_gallons_per_unit": 66,
+    "units_served": 2,
+    "tank_insulation_btu_hr_gal_f": 6.6,
+    "source": "Input Parameters Sheet - Baseline"
+  },
+  "infiltration_baseline": {
+    "flow_per_exterior_area_m3_s_m2": 0.0007,
+    "schedule": "ABC_Infil_[room]_A8 (seasonal, per room type)",
+    "source": "ASHRAE Fundamentals; Sherman & Grimsrud (1980)",
+    "notes": "Design rate = occupied-period peak. Seasonal schedule combines occupancy pattern \u00d7 \u0394T^0.65 multiplier. Schedule values \u2264 1.0."
+  },
+  "ventilation_baseline": {
+    "ach": 0.49,
+    "flow_per_area_m3_s_m2": 0.000332,
+    "ceiling_height_m": 2.44,
+    "source": "Input Parameters Sheet - Baseline",
+    "calculation": "0.49 ACH \u00d7 2.44 m / 3600 s = 0.000332 m\u00b3/s/m\u00b2"
+  },
+  "internal_loads_baseline": {
+    "lighting_w_m2": 5.17,
+    "equipment_bedroom_w_m2": 18.0,
+    "equipment_livingroom_kitchen_w_m2": 28.0,
+    "equipment_bathroom_w_m2": 2.5,
+    "occupancy_ppl_m2": 0.0269,
+    "activity_w_person": 132,
+    "source": "Input Parameters Sheet - Baseline; equipment per measured electricity sub-meter data"
+  }
+}

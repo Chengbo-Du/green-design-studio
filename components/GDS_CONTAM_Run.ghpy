@@ -1,0 +1,575 @@
+# -*- coding: utf-8 -*-
+"""
+GDS CONTAM IAQ Simulation Runner
+================================
+
+SPDX-License-Identifier: BSD-3-Clause
+Copyright (c) 2026 SyracuseCoE, Syracuse University. All rights reserved.
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the conditions stated in the
+LICENSE file distributed with this project are met.
+
+Author: Chengbo Du <cdu113@syr.edu>
+
+Run a CONTAM IAQ simulation. Extract geometry from Breps, assemble the
+spec, and dispatch to gds_contam_v3.py via CPython subprocess. Schedule
+parsing, seasonal partitioning, PRJ generation, ContamX execution, and
+SIM result stitching are handled on the CPython side.
+
+INPUTS:
+  breps         : list[Brep]  - Room geometry (closed Breps)
+  room_names    : list[str]   - Room names matching breps
+  T_indoor      : list[float] - Indoor temperature [C] per room (default 20)
+  occupants     : list[int]   - Occupants per room (overridden by program_data)
+  program_data  : list[str]   - HB ProgramType JSON per room (optional;
+                                derives occupants and schedules; seasonal
+                                schedules with the # convention are accepted)
+  ambient_co2   : float       - Outdoor CO2 [ppm] (default 415)
+  openings_json : str         - JSON from GDS_CONTAM_OPENINGS (required)
+  T_outdoor     : float       - Outdoor temperature [C] (default 0)
+  wind_speed    : float       - Wind speed [m/s] (default 5)
+  wind_dir      : float       - Wind direction [deg, 0=N] (default 0)
+  sim_start     : str         - "MM-DD" (default "01-01")
+  sim_end       : str         - "MM-DD" (default: sim_start + sim_days)
+  sim_days      : int         - Legacy; overridden by sim_end when connected
+  epw_path      : str         - EPW file (optional; needs WTH conversion)
+  wth_path      : str         - WTH file (optional; takes priority over EPW)
+  contamx_path  : str         - Path to contamx3.exe
+  cpython_path  : str         - Path to CPython interpreter
+  script_path   : str         - Path to gds_contam_v3.py
+  run           : bool        - Set True to execute
+
+OUTPUTS:
+  prj_path     : str             - Path to .prj file
+  results_json : str             - Path to _summary.json
+  co2_data     : DataTree[float] - Hourly CO2 ppm per zone
+  msg          : str             - Status / diagnostics
+"""
+
+import Rhino.Geometry as rg
+import rhinoscriptsyntax as rs
+import os, json, subprocess, sys
+import scriptcontext as sc
+import math
+
+# --- GEOMETRY EXTRACTION ---
+
+def _extract_floor_polygon(brep, base_z, tolerance=0.15):
+    """Extract the floor outline of a Brep as a 2D polygon.
+
+    Finds the bottom-most horizontal face (near base_z) and returns
+    its outer boundary vertices projected to XY.
+
+    Returns list of [x, y] pairs, or None if no suitable face found.
+    """
+    best_face = None
+    best_area = 0.0
+
+    for fi in range(brep.Faces.Count):
+        face = brep.Faces[fi]
+        u_mid = face.Domain(0).Mid
+        v_mid = face.Domain(1).Mid
+        normal = face.NormalAt(u_mid, v_mid)
+        pt = face.PointAt(u_mid, v_mid)
+
+        # Floor face: horizontal normal, centroid Z near base_z
+        if abs(normal.Z) < 0.7:
+            continue
+        if abs(pt.Z - base_z) > tolerance:
+            continue
+
+        amp = rg.AreaMassProperties.Compute(face)
+        area = amp.Area if amp else 0.0
+        if area > best_area:
+            best_area = area
+            best_face = face
+
+    if best_face is None:
+        return None
+
+    # Get the outer boundary loop
+    loop = best_face.OuterLoop
+    if loop is None:
+        return None
+
+    crv3d = loop.To3dCurve()
+    if crv3d is None:
+        return None
+
+    # Try polyline extraction first (fast, exact for box rooms)
+    pts = []
+    result = crv3d.TryGetPolyline()
+    if result[0]:
+        polyline = result[1]
+        for pi in range(polyline.Count - 1):  # skip closing duplicate
+            p = polyline[pi]
+            pts.append([round(float(p.X), 2), round(float(p.Y), 2)])
+    else:
+        # Densify: sample the curve at intervals
+        length = crv3d.GetLength()
+        n_samples = max(8, int(length / 0.5))
+        params = crv3d.DivideByCount(n_samples, True)
+        if params:
+            for t in params:
+                p = crv3d.PointAt(t)
+                pts.append([round(float(p.X), 2), round(float(p.Y), 2)])
+
+    if len(pts) < 3:
+        return None
+
+    return pts
+
+def extract_zone_data(breps, room_names, T_indoor=None):
+    """Extract volume, height, centroid from each Brep.
+    
+    Returns fully serialized zone dicts (no Rhino objects) ready for JSON.
+    """
+    zones = []
+    for i, brep in enumerate(breps):
+        name = room_names[i] if i < len(room_names) else "Room{}".format(i+1)
+        T = T_indoor[i] if T_indoor and i < len(T_indoor) else 20.0
+        if T is None:
+            T = 20.0
+
+        vmp = rg.VolumeMassProperties.Compute(brep)
+        vol = vmp.Volume if vmp else 100.0
+
+        bb = brep.GetBoundingBox(True)
+        height = bb.Max.Z - bb.Min.Z
+        if height <= 0:
+            height = 3.0
+
+        # Serialize all values to JSON-safe primitives
+        zd = {
+            'name': name,
+            'volume': round(vol, 2),
+            'height': round(height, 2),
+            'T_C': T,
+            'bbox_min_z': bb.Min.Z,
+            'bbox_max_z': bb.Max.Z,
+            'level': 1,
+        }
+
+        # Centroid
+        if vmp and vmp.Centroid:
+            c = vmp.Centroid
+            zd['cx'] = round(float(c.X), 2)
+            zd['cy'] = round(float(c.Y), 2)
+            zd['cz'] = round(float(c.Z), 2)
+        else:
+            c = bb.Center
+            zd['cx'] = round(float(c.X), 2)
+            zd['cy'] = round(float(c.Y), 2)
+            zd['cz'] = round(float(c.Z), 2)
+
+        # Bounding box
+        zd['bb_min'] = [round(float(bb.Min.X), 2), round(float(bb.Min.Y), 2)]
+        zd['bb_max'] = [round(float(bb.Max.X), 2), round(float(bb.Max.Y), 2)]
+
+        # Floor polygon
+        zd['floor_polygon'] = _extract_floor_polygon(brep, bb.Min.Z)
+
+        zones.append(zd)
+    return zones
+
+# --- MULTI-LEVEL SUPPORT ---
+
+def detect_levels(zones, floor_tolerance=0.3):
+    """Group zones into levels based on their Z positions.
+    
+    Returns updated zones with 'level' field and a list of Level definitions.
+    """
+    z_bases = sorted(set(round(z['bbox_min_z'], 1) for z in zones))
+
+    levels = []
+    current_base = z_bases[0] if z_bases else 0
+    level_idx = 1
+    level_map = {}
+
+    for zb in z_bases:
+        if zb - current_base > floor_tolerance:
+            level_idx += 1
+            current_base = zb
+        level_map[round(zb, 1)] = level_idx
+
+    for z in zones:
+        zb = round(z['bbox_min_z'], 1)
+        z['level'] = level_map.get(zb, 1)
+
+    level_defs = []
+    for lv in sorted(set(level_map.values())):
+        lv_zones = [z for z in zones if z['level'] == lv]
+        if lv_zones:
+            ref_ht = min(z['bbox_min_z'] for z in lv_zones)
+            del_ht = max(z['height'] for z in lv_zones)
+            level_defs.append({
+                'index': lv,
+                'refht': round(ref_ht, 2),
+                'delht': round(del_ht, 2),
+                'name': "Level{}".format(lv)
+            })
+
+    return zones, level_defs
+
+# --- SPEC ASSEMBLY ---
+
+def _parse_date_str(date_str):
+    """Parse 'MM-DD' or 'MM/DD' to [month, day]. Returns None on failure."""
+    if not date_str or not isinstance(date_str, str):
+        return None
+    date_str = date_str.strip().replace('/', '-')
+    parts = date_str.split('-')
+    if len(parts) != 2:
+        return None
+    try:
+        m, d = int(parts[0]), int(parts[1])
+        if 1 <= m <= 12 and 1 <= d <= 31:
+            return [m, d]
+    except (ValueError, TypeError):
+        pass
+    return None
+
+def build_raw_spec(zones, openings,
+                   occupants=None, program_data=None,
+                   ambient_co2=415,
+                   T_outdoor=0, wind_speed=5, wind_dir=0,
+                   sim_start=None, sim_end=None, sim_days=1,
+                   epw_path="", wth_path="", contamx_path="",
+                   output_dir=""):
+    """Assemble raw JSON spec for gds_contam_v3.py.
+    
+    Unlike the old build_spec, this does NO schedule/program parsing.
+    Raw program_data strings are passed through for v3 to handle.
+    
+    Simulation period:
+      - If sim_start and sim_end both given: use date range
+      - If only sim_start: start from there for sim_days days
+      - If neither: Jan 1 for sim_days days (legacy)
+    """
+    if not output_dir:
+        output_dir = os.path.join(os.environ.get('USERPROFILE', ''),
+                                  'Documents', 'GDS_CONTAM')
+    if not os.path.exists(output_dir):
+        os.makedirs(output_dir)
+
+    # Guard numerics
+    sim_days = sim_days if sim_days else 1
+    T_outdoor = T_outdoor if T_outdoor is not None else 0.0
+    wind_speed = wind_speed if wind_speed is not None else 5.0
+    wind_dir = wind_dir if wind_dir is not None else 0.0
+    ambient_co2 = float(ambient_co2) if ambient_co2 is not None else 415.0
+
+    # Resolve simulation period
+    start = _parse_date_str(sim_start) if isinstance(sim_start, str) else None
+    end = _parse_date_str(sim_end) if isinstance(sim_end, str) else None
+    if not start:
+        start = [1, 1]
+
+    spec = {
+        'output_prj': os.path.join(output_dir, 'gds_model.prj'),
+        'contamx_path': contamx_path,
+        'location': {'lat': 43.04, 'lon': -76.14, 'timezone': -5, 'altitude': 127},
+        'simulation': {
+            'start_date': start,
+            'timestep_min': 5,
+            'output_hr': 1,
+            'sim_af': 1,
+        },
+        'ambient_co2_ppm': ambient_co2,
+        'species': ['CO2', 'PM2.5'],
+        'zones': zones,  # already serialized (no Rhino objects)
+        'openings': openings if openings else [],
+        'sources': [],
+    }
+
+    # Simulation end date or days
+    if end:
+        spec['simulation']['end_date'] = end
+    else:
+        spec['simulation']['days'] = int(sim_days)
+
+    # Contaminant solver mode
+    total_days = int(sim_days)
+    if end:
+        # Approximate days for solver mode selection
+        month_days = [0, 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
+        s_doy = sum(month_days[:start[0]]) + start[1]
+        e_doy = sum(month_days[:end[0]]) + end[1]
+        total_days = (e_doy - s_doy + 1) if e_doy >= s_doy else (365 - s_doy + e_doy + 1)
+    # sim_mf: 2=transient-cyclic (multi-day), 3=transient-non-cyclic (single-day)
+    spec['simulation']['sim_mf'] = 2 if total_days > 1 else 3
+
+    # Weather
+    if wth_path and os.path.exists(str(wth_path)):
+        spec['weather'] = {
+            'mode': 'wth',
+            'wth_path': str(wth_path),
+            'epw_path': str(epw_path) if epw_path else ''
+        }
+    elif epw_path and os.path.exists(str(epw_path)):
+        spec['weather'] = {'mode': 'epw', 'epw_path': str(epw_path)}
+    else:
+        spec['weather'] = {
+            'mode': 'steady_state',
+            'T_C': float(T_outdoor),
+            'wind_speed': float(wind_speed),
+            'wind_dir': float(wind_dir)
+        }
+
+    # Program data: pass raw JSON strings for v3 to parse
+    if program_data:
+        spec['program_data'] = program_data
+
+    # Manual occupants fallback (used by v3 if program_data parsing fails)
+    if occupants:
+        spec['occupants'] = []
+        for i, occ in enumerate(occupants):
+            if occ and occ > 0 and i < len(zones):
+                spec['occupants'].append({
+                    'zone': zones[i]['name'],
+                    'species': 'CO2',
+                    'occupants': int(occ)
+                })
+
+    return spec
+
+def run_contam_pipeline(spec, cpython_path, script_path):
+    """Write JSON, call CPython, read results back."""
+
+    json_dir = os.path.dirname(spec['output_prj'])
+    json_path = os.path.join(json_dir, 'gds_spec.json')
+    with open(json_path, 'w') as f:
+        json.dump(spec, f, indent=2)
+
+    # Clean environment: strip Rhino's Python paths
+    clean_env = {}
+    for k, v in os.environ.items():
+        clean_env[k] = v
+    for poison_key in ['PYTHONPATH', 'PYTHONHOME', 'PYTHONSTARTUP',
+                       'IRONPYTHONPATH', 'IRONPYTHONSTARTUP']:
+        clean_env.pop(poison_key, None)
+    if 'PATH' in clean_env:
+        parts = clean_env['PATH'].split(';')
+        parts = [p for p in parts if '.rhinocode' not in p.lower()]
+        clean_env['PATH'] = ';'.join(parts)
+
+    cmd = [cpython_path, script_path, 'from_json', json_path]
+    result = subprocess.Popen(
+        cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        env=clean_env)
+    stdout, stderr = result.communicate()
+
+    msg = stdout.decode('utf-8', errors='replace')
+    err = stderr.decode('utf-8', errors='replace')
+
+    if err.strip():
+        msg += "\n[STDERR] " + err.strip()
+
+    summary_path = spec['output_prj'].replace('.prj', '_summary.json')
+    results = None
+    if os.path.exists(summary_path):
+        with open(summary_path, 'r') as f:
+            results = json.load(f)
+
+    return msg, err, results, summary_path
+
+# --- MAIN GH EXECUTION ---
+
+# Default values for optional inputs
+if 'breps' not in dir() or not breps:
+    breps = []
+if 'room_names' not in dir() or not room_names:
+    room_names = ["Room{}".format(i+1) for i in range(len(breps))]
+if 'T_indoor' not in dir() or not T_indoor:
+    T_indoor = [20.0] * len(breps)
+if 'occupants' not in dir() or not occupants:
+    occupants = [0] * len(breps)
+if 'program_data' not in dir() or not program_data:
+    program_data = []
+else:
+    # Sanitize: GH may pass 0.0 or None for unconnected items
+    _clean = []
+    for pd in program_data:
+        if isinstance(pd, str) and pd.strip() and pd.strip()[0] == '{':
+            _clean.append(pd)
+        elif isinstance(pd, dict):
+            _clean.append(json.dumps(pd))
+    program_data = _clean
+if 'ambient_co2' not in dir() or ambient_co2 is None:
+    ambient_co2 = 415.0
+if 'openings_json' not in dir() or not openings_json:
+    openings_json = "[]"
+if 'T_outdoor' not in dir() or T_outdoor is None:
+    T_outdoor = 0.0
+if 'wind_speed' not in dir() or wind_speed is None:
+    wind_speed = 5.0
+if 'wind_dir' not in dir() or wind_dir is None:
+    wind_dir = 0.0
+# New: sim_start / sim_end (date range)
+if 'sim_start' not in dir() or not sim_start:
+    sim_start = ""
+if 'sim_end' not in dir() or not sim_end:
+    sim_end = ""
+# Legacy: sim_days (still supported as fallback)
+if 'sim_days' not in dir() or not sim_days:
+    sim_days = 1
+if 'epw_path' not in dir() or not epw_path:
+    epw_path = ""
+if 'wth_path' not in dir() or not wth_path:
+    wth_path = ""
+if 'contamx_path' not in dir() or not contamx_path:
+    contamx_path = r"C:\Program Files (x86)\NIST\CONTAM 3.4.0.6\contamx3.exe"
+if 'cpython_path' not in dir() or not cpython_path:
+    cpython_path = r"C:\Windows\py.exe"
+if 'script_path' not in dir() or not script_path:
+    script_path = ""
+if 'run' not in dir():
+    run = False
+
+# Outputs
+prj_path = ""
+results_json = ""
+co2_data = None
+msg = ""
+
+if not run:
+    try:
+        n_openings = len(json.loads(openings_json))
+    except Exception:
+        n_openings = 0
+    msg = "Set run=True. {} Breps, {} openings loaded.".format(
+        len(breps), n_openings)
+elif not breps:
+    msg = "ERROR: No Breps connected."
+elif not script_path or not os.path.exists(script_path):
+    msg = "ERROR: Set script_path to gds_contam_v3.py location."
+elif not os.path.exists(contamx_path):
+    msg = "ERROR: contamx3.exe not found at: {}".format(contamx_path)
+else:
+    try:
+        # Step 1: Extract geometry (returns serialized dicts — no Rhino objects)
+        zones = extract_zone_data(breps, room_names, T_indoor)
+        msg = "Extracted {} zones. ".format(len(zones))
+
+        # Step 2: Detect levels
+        zones, level_defs = detect_levels(zones)
+        msg += "{} level(s). ".format(len(level_defs))
+
+        # Step 3: Parse openings from interpreter
+        try:
+            openings = json.loads(openings_json) if isinstance(openings_json, str) else openings_json
+        except Exception:
+            openings = []
+        msg += "{} openings. ".format(len(openings))
+
+        # Step 4: Build raw spec (no schedule parsing — v3 handles that)
+        output_dir = os.path.join(os.environ.get('USERPROFILE', '.'),
+                                  'Documents', 'GDS_CONTAM')
+        spec = build_raw_spec(
+            zones, openings,
+            occupants=occupants, program_data=program_data,
+            ambient_co2=ambient_co2,
+            T_outdoor=T_outdoor, wind_speed=wind_speed, wind_dir=wind_dir,
+            sim_start=sim_start, sim_end=sim_end, sim_days=sim_days,
+            epw_path=epw_path, wth_path=wth_path,
+            contamx_path=contamx_path, output_dir=output_dir)
+
+        # Step 4b: Wireless occupancy bridge (Hub → CONTAM, no wiring needed)
+        # If program_data is not wired, check sc.sticky for Hub's occupancy export.
+        # Priority: program_data (wired) > contam_occupancy (wireless) > manual occupants
+        if not program_data:
+            import scriptcontext as _sc
+            _occ = _sc.sticky.get("GDS_CONTAM_OCC")
+            if _occ and isinstance(_occ, dict) and _occ.get('rooms'):
+                spec['contam_occupancy'] = _occ
+                n_occ_rooms = len(_occ['rooms'])
+                # Check for seasonal data
+                n_seasonal = sum(1 for r in _occ['rooms'].values()
+                                 if r.get('seasonal'))
+                occ_msg = "{} rooms from Hub occupancy".format(n_occ_rooms)
+                if n_seasonal:
+                    occ_msg += " ({} with seasonal)".format(n_seasonal)
+                msg += occ_msg + ". "
+
+        # Pre-run summary
+        n_prog = len(program_data)
+        n_occ_manual = len(spec.get('occupants', []))
+        has_contam_occ = bool(spec.get('contam_occupancy'))
+        if n_prog > 0:
+            msg += "{} program_data entries -> v3 will parse. ".format(n_prog)
+        elif has_contam_occ:
+            pass  # already reported above
+        elif n_occ_manual > 0:
+            msg += "{} manual occupant sources. ".format(n_occ_manual)
+        else:
+            msg += "WARNING: no occupants or program_data. "
+
+        # Weather summary
+        wx = spec.get('weather', {})
+        wx_mode = wx.get('mode', 'unknown')
+        if wx_mode == 'wth':
+            msg += "Weather: WTH. "
+        elif wx_mode == 'epw':
+            msg += "Weather: EPW. "
+        else:
+            msg += "Weather: steady T={}C. ".format(wx.get('T_C', '?'))
+
+        # Sim period summary
+        sim_cfg = spec.get('simulation', {})
+        sd = sim_cfg.get('start_date', [1, 1])
+        ed = sim_cfg.get('end_date')
+        if ed:
+            msg += "Sim: {}/{} -> {}/{}. ".format(sd[0], sd[1], ed[0], ed[1])
+        else:
+            msg += "Sim: {}/{} +{} days. ".format(
+                sd[0], sd[1], sim_cfg.get('days', '?'))
+
+        # Step 5: Run pipeline (v3 does all simulation logic)
+        stdout, stderr, results, summary_path = run_contam_pipeline(
+            spec, cpython_path, script_path)
+
+        prj_path = spec['output_prj']
+        results_json = summary_path
+
+        # Check if PRJ was created
+        if os.path.exists(prj_path):
+            msg += "PRJ created. "
+        else:
+            msg += "WARNING: PRJ not created. "
+
+        # Show v3 pipeline output (includes schedule info, seasonal partitions)
+        if stdout.strip():
+            msg += stdout.strip() + " "
+
+        # Step 6: Extract CO2 data for GH visualization
+        if results:
+            from Grasshopper import DataTree
+            from Grasshopper.Kernel.Data import GH_Path
+
+            co2_data = DataTree[float]()
+            zone_names_res = results.get('zones', [])
+            for zi, zname in enumerate(zone_names_res):
+                path = GH_Path(zi)
+                for entry in results.get('hourly', []):
+                    zd = entry.get('zone_data', {}).get(zname, {})
+                    co2_data.Add(zd.get('CO2_ppm', 0.0), path)
+
+            msg += "Results: {} zones x {} hours.".format(
+                len(zone_names_res),
+                len(results.get('hourly', [])))
+
+            # Show seasonal segments if present
+            segments = results.get('seasonal_segments', [])
+            if segments:
+                msg += "\n--- SEASONAL SEGMENTS ({}) ---".format(len(segments))
+                for seg in segments:
+                    msg += "\n  {}/{} - {}/{}: {}".format(
+                        seg.get('start', [0, 0])[0], seg.get('start', [0, 0])[1],
+                        seg.get('end', [0, 0])[0], seg.get('end', [0, 0])[1],
+                        seg.get('label', ''))
+
+    except Exception as e:
+        msg = "ERROR: {}".format(str(e))
+        import traceback
+        msg += "\n" + traceback.format_exc()

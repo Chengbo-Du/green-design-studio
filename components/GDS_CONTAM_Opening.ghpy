@@ -1,0 +1,673 @@
+# -*- coding: utf-8 -*-
+"""
+GDS CONTAM Openings Interpreter
+===============================
+
+SPDX-License-Identifier: BSD-3-Clause
+Copyright (c) 2026 SyracuseCoE, Syracuse University. All rights reserved.
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the conditions stated in the
+LICENSE file distributed with this project are met.
+
+Author: Chengbo Du <cdu113@syr.edu>
+
+Translate Brep geometry and per-opening states to CONTAM airflow path
+specifications. Output is consumed by GDS_CONTAM_RUN.
+
+INPUTS:
+  run            : bool        - Trigger run; results cached in sc.sticky
+  breps          : list[Brep]  - Room geometry
+  room_names     : list[str]   - Room names matching breps
+  window_breps   : list[Brep]  - Window surfaces (optional)
+  window_states  : list[str]   - Per-window: "open" / "closed" / "tilted" / "fixed"
+  door_breps     : list[Brep]  - Door surfaces (optional)
+  door_states    : list[str]   - Per-door: "open" / "closed" / "ajar"
+  envelope_el    : str         - "tight" / "typical" / "leaky"
+  window_el      : str         - "tight" / "typical" / "leaky"
+                                 (frame seal for closed/fixed windows)
+  interior_el    : str         - "door_open" / "door_undercut"
+  vertical_el    : str         - "floor_leak" / "stairwell" / "shaft" / "open"
+                                 (inter-floor connections)
+
+OUTPUTS:
+  openings_json : str  - JSON array of opening specs
+  msg           : str  - Status / diagnostics
+"""
+
+import Rhino.Geometry as rg
+import scriptcontext as sc
+import json, math
+
+# --- PRESET LIBRARIES ---
+
+# Envelope presets: values verified against ASHRAE and CONTAM defaults.
+# Flow in kg/s per m2 of wall area at reference dP.
+ENVELOPE_PRESETS = {
+    "tight":   {"dP": 50.0, "Flow": 0.0005, "expt": 0.65},  # ACH50 ~ 1
+    "typical": {"dP": 50.0, "Flow": 0.0025, "expt": 0.65},  # ACH50 ~ 5
+    "leaky":   {"dP": 50.0, "Flow": 0.0075, "expt": 0.65},  # ACH50 ~ 15
+}
+
+# Door state -> effective geometry.  All use dor_door (two-way flow).
+# ht_factor: fraction of actual door height used as effective opening.
+# cd: discharge coefficient.
+DOOR_STATE_MAP = {
+    "open":   {"ht_factor": 1.0,  "cd": 0.78},
+    "closed": {"ht_factor": 0.0,  "cd": 0.65, "ht_override": 0.01},  # undercut
+    "ajar":   {"ht_factor": 0.3,  "cd": 0.60},
+}
+
+# Door frame leakage (plr_test1).
+# Added as a companion path for every door — models air leakage through the
+# perimeter crack between door frame and wall, independent of door state.
+# Flow is per metre of perimeter at reference dP; mult = perimeter length.
+# Reference: ASHRAE Fundamentals Ch.16, typical residential frame crack.
+DOOR_FRAME_LEAK = {
+    "dP": 50.0, "Flow": 0.00035, "expt": 0.65,   # ~0.35 g/s per m @ 50 Pa
+}
+
+# Window state -> opening type + params.
+# "open":   dor_door with full height (fully open casement/awning)
+# "tilted": dor_door with 15% effective height (tilt-and-turn cracked)
+# "closed": plr_test1 perimeter crack (frame leakage only)
+# "fixed":  plr_test1 very tight (sealed/non-operable)
+WINDOW_STATE_MAP = {
+    "open":   {"type": "dor_door", "ht_factor": 1.0, "cd": 0.60},
+    "tilted": {"type": "dor_door", "ht_factor": 0.15, "cd": 0.40},
+    "closed": {"type": "plr_test1", "dP": 50.0, "Flow": 0.0015, "expt": 0.65},
+    "fixed":  {"type": "plr_test1", "dP": 50.0, "Flow": 0.0005, "expt": 0.65},
+}
+
+# Window element presets (controls frame seal quality for closed/fixed windows).
+# Overrides the Flow parameter in WINDOW_STATE_MAP for "closed" and "fixed" states.
+# "tight"   = well-sealed modern frames
+# "typical" = standard residential (default, matches WINDOW_STATE_MAP values)
+# "leaky"   = old/deteriorated frames, single-pane
+WINDOW_EL_PRESETS = {
+    "tight":   {"dP": 50.0, "Flow": 0.0005, "expt": 0.65},
+    "typical": {"dP": 50.0, "Flow": 0.0015, "expt": 0.65},
+    "leaky":   {"dP": 50.0, "Flow": 0.005, "expt": 0.65},
+}
+
+# Interior adjacency presets (for auto-detected shared faces without door breps).
+INTERIOR_PRESETS = {
+    "door_open":     {"ht": 2.1, "wd": 0.9, "cd": 0.78},
+    "door_undercut": {"ht": 0.01, "wd": 0.9, "cd": 0.65},
+}
+
+# Vertical connection presets.  Each maps to a dtype + params.
+# Ht and Area are overridden by actual detected geometry.
+VERTICAL_PRESETS = {
+    "floor_leak":  {"dtype": "plr_test1",
+                    "params": {"dP": 50.0, "Flow": 0.001, "expt": 0.65}},
+    "stairwell":   {"dtype": "plr_stair",
+                    "params": {"Ht": 3.0, "Area": 8.0, "peo": 0.0, "tread": 0}},
+    "shaft":       {"dtype": "plr_shaft",
+                    "params": {"Ht": 3.0, "area": 4.0, "perim": 8.0, "rough": 0.003}},
+    "open":        {"dtype": "dor_door",
+                    "params": {"ht": 2.1, "wd": 2.0, "cd": 0.78}},
+}
+
+# --- GEOMETRY ANALYSIS ---
+
+def _extract_zones(breps, room_names):
+    """Lightweight zone extraction for geometry matching only.
+    Returns list of zone dicts with brep, name, bbox data."""
+    zones = []
+    for i, brep in enumerate(breps):
+        name = room_names[i] if i < len(room_names) else "Room{}".format(i + 1)
+        bb = brep.GetBoundingBox(True)
+        zones.append({
+            'name': name,
+            'brep': brep,
+            'bbox_min_z': bb.Min.Z,
+            'bbox_max_z': bb.Max.Z,
+            'height': bb.Max.Z - bb.Min.Z if bb.Max.Z > bb.Min.Z else 3.0,
+        })
+    return zones
+
+def _detect_envelope_faces(zones, tolerance=0.01):
+    """Find exterior vertical faces -> one opening per face.
+    Uses bbox proximity to skip expensive ClosestPoint calls."""
+    # Pre-compute inflated bboxes for all zones
+    zone_bboxes = []
+    for z in zones:
+        bb = z['brep'].GetBoundingBox(True)
+        bb.Inflate(tolerance * 10)
+        zone_bboxes.append(bb)
+
+    envelopes = []
+    for zi, zone in enumerate(zones):
+        brep = zone['brep']
+        for fi in range(brep.Faces.Count):
+            face = brep.Faces[fi]
+            u_mid = face.Domain(0).Mid
+            v_mid = face.Domain(1).Mid
+            pt = face.PointAt(u_mid, v_mid)
+            normal = face.NormalAt(u_mid, v_mid)
+
+            if abs(normal.Z) > 0.7:
+                continue  # skip floors/ceilings
+
+            # Check if shared with another zone -- bbox gate first
+            is_interior = False
+            for zj, other in enumerate(zones):
+                if zj == zi:
+                    continue
+                if not zone_bboxes[zj].Contains(pt):
+                    continue  # face centre not even near this zone
+                cp = other['brep'].ClosestPoint(pt)
+                if cp.IsValid and pt.DistanceTo(cp) < tolerance * 10:
+                    is_interior = True
+                    break
+            if is_interior:
+                continue
+
+            amp = rg.AreaMassProperties.Compute(face)
+            area = amp.Area if amp else 1.0
+            azimuth = math.degrees(math.atan2(normal.X, normal.Y))
+            if azimuth < 0:
+                azimuth += 360
+            relHt = pt.Z - zone['bbox_min_z']
+
+            envelopes.append({
+                'zone': zone['name'], 'area': round(area, 2),
+                'azimuth': round(azimuth, 1), 'relHt': round(relHt, 2),
+            })
+    return envelopes
+
+def _detect_adjacencies(zones, tolerance=0.1):
+    """Find shared faces between zone Breps -> interior connections.
+    Uses tight bbox overlap to skip expensive BrepBrep intersections."""
+    connections = []
+    n = len(zones)
+    for i in range(n):
+        for j in range(i + 1, n):
+            bbi = zones[i]['brep'].GetBoundingBox(True)
+            bbj = zones[j]['brep'].GetBoundingBox(True)
+            # Tight gap check: bboxes must be within tolerance on ALL axes
+            gap_x = max(bbi.Min.X, bbj.Min.X) - min(bbi.Max.X, bbj.Max.X)
+            gap_y = max(bbi.Min.Y, bbj.Min.Y) - min(bbi.Max.Y, bbj.Max.Y)
+            gap_z = max(bbi.Min.Z, bbj.Min.Z) - min(bbi.Max.Z, bbj.Max.Z)
+            if gap_x > tolerance or gap_y > tolerance or gap_z > tolerance:
+                continue  # bboxes clearly separated -- skip
+            result = rg.Intersect.Intersection.BrepBrep(
+                zones[i]['brep'], zones[j]['brep'], tolerance)
+            if result and len(result[1]) > 0:
+                connections.append({
+                    'zone_a': zones[i]['name'],
+                    'zone_b': zones[j]['name'],
+                })
+    return connections
+
+def _detect_levels(zones, floor_tolerance=0.3):
+    """Group zones into levels by Z base, assign level index to each zone."""
+    z_bases = sorted(set(round(z['bbox_min_z'], 1) for z in zones))
+    level_idx = 1
+    current_base = z_bases[0] if z_bases else 0
+    level_map = {}
+    for zb in z_bases:
+        if zb - current_base > floor_tolerance:
+            level_idx += 1
+            current_base = zb
+        level_map[round(zb, 1)] = level_idx
+    for z in zones:
+        z['level'] = level_map.get(round(z['bbox_min_z'], 1), 1)
+    return len(set(level_map.values()))
+
+def _detect_vertical_connections(zones, tolerance=0.1):
+    """Find vertically stacked zone pairs (ceiling<->floor adjacency)."""
+    vertical = []
+    n = len(zones)
+    for i in range(n):
+        for j in range(i + 1, n):
+            if zones[i].get('level', 1) == zones[j].get('level', 1):
+                continue
+            top_i = zones[i]['bbox_max_z']
+            bot_j = zones[j]['bbox_min_z']
+            top_j = zones[j]['bbox_max_z']
+            bot_i = zones[i]['bbox_min_z']
+
+            below, above = None, None
+            if abs(top_i - bot_j) < tolerance:
+                below, above = zones[i], zones[j]
+            elif abs(top_j - bot_i) < tolerance:
+                below, above = zones[j], zones[i]
+
+            if below and above:
+                # Level height for stairwell/shaft elements
+                level_ht = round(above['bbox_min_z'] - below['bbox_min_z'], 2)
+                if level_ht <= 0:
+                    level_ht = below['height']
+                vertical.append({
+                    'zone_below': below['name'],
+                    'zone_above': above['name'],
+                    'level_ht': level_ht,
+                })
+    return vertical
+
+def _match_breps_to_zones(breps, zones, tolerance=0.5):
+    """For each brep, find touching zones (sorted by distance).
+    Returns list of (brep_index, centroid, normal, bbox, touching_zones)."""
+    results = []
+    # Pre-compute zone bboxes inflated by tolerance
+    zone_bboxes = []
+    for z in zones:
+        bb = z['brep'].GetBoundingBox(True)
+        bb.Inflate(tolerance)
+        zone_bboxes.append(bb)
+
+    for bi, brep in enumerate(breps):
+        if brep is None:
+            continue
+        amp = rg.AreaMassProperties.Compute(brep)
+        if not amp or amp.Area < 0.01:
+            continue
+        centroid = amp.Centroid
+        area = amp.Area
+
+        normal = None
+        if brep.Faces.Count > 0:
+            face = brep.Faces[0]
+            u = face.Domain(0).Mid
+            v = face.Domain(1).Mid
+            normal = face.NormalAt(u, v)
+
+        bb = brep.GetBoundingBox(True)
+        dx = bb.Max.X - bb.Min.X
+        dy = bb.Max.Y - bb.Min.Y
+        dz = bb.Max.Z - bb.Min.Z
+
+        touching = []
+        for zi, zone in enumerate(zones):
+            # Skip if centroid not even near this zone's bbox
+            if not zone_bboxes[zi].Contains(centroid):
+                continue
+            cp = zone['brep'].ClosestPoint(centroid)
+            if cp.IsValid:
+                dist = centroid.DistanceTo(cp)
+                if dist < tolerance:
+                    touching.append((dist, zone))
+        touching.sort(key=lambda x: x[0])
+
+        results.append({
+            'index': bi, 'centroid': centroid, 'normal': normal,
+            'area': area, 'bb': bb,
+            'height': dz if dz > 0.01 else 1.0,
+            'width': max(dx, dy) if max(dx, dy) > 0.01 else area / max(dz, 0.01),
+            'touching': touching,
+        })
+    return results
+
+# --- CONVERSION ---
+
+def _envelope_to_opening(env, preset_params):
+    """Convert one envelope face detection to an opening entry."""
+    return {
+        'dtype': 'plr_test1',
+        'params': dict(preset_params),  # copy
+        'zone_a': None,
+        'zone_b': env['zone'],
+        'relHt': env['relHt'],
+        'mult': env['area'],
+        'wazm': env['azimuth'],
+        'wind_pressure': True,
+        'desc': 'envelope_{}'.format(env['zone']),
+    }
+
+def _adjacency_to_opening(conn, preset_params):
+    """Convert auto-detected adjacency to an opening entry."""
+    return {
+        'dtype': 'dor_door',
+        'params': dict(preset_params),
+        'zone_a': conn['zone_a'],
+        'zone_b': conn['zone_b'],
+        'relHt': 0.0,
+        'mult': 1.0,
+        'wazm': 0.0,
+        'wind_pressure': False,
+        'desc': 'adj_{}_{}'.format(conn['zone_a'], conn['zone_b']),
+    }
+
+def _window_to_opening(match, state, window_el="typical"):
+    """Convert matched window Brep to an opening entry.
+    
+    state: one of "open"/"tilted"/"closed"/"fixed" from window_states list.
+    window_el: "tight"/"typical"/"leaky" — controls frame seal quality for
+               closed/fixed windows (overrides WINDOW_STATE_MAP Flow params).
+    """
+    if not match['touching']:
+        return None
+    zone = match['touching'][0][1]
+    h = match['height']
+    w = match['width']
+
+    state = state.lower().strip() if state else "closed"
+    if state not in WINDOW_STATE_MAP:
+        state = "closed"
+    smap = WINDOW_STATE_MAP[state]
+
+    normal = match['normal']
+    azimuth = 0.0
+    if normal and abs(normal.Z) < 0.7:
+        azimuth = math.degrees(math.atan2(normal.X, normal.Y))
+        if azimuth < 0:
+            azimuth += 360
+
+    relHt = match['centroid'].Z - zone['bbox_min_z']
+    if relHt < 0:
+        relHt = 0.5
+
+    if smap['type'] == 'dor_door':
+        eff_ht = h * smap['ht_factor']
+        if eff_ht < 0.01:
+            eff_ht = 0.01
+        return {
+            'dtype': 'dor_door',
+            'params': {'ht': round(eff_ht, 3), 'wd': round(w, 3),
+                       'cd': smap['cd']},
+            'zone_a': None,
+            'zone_b': zone['name'],
+            'relHt': round(relHt, 2),
+            'mult': 1.0,
+            'wazm': round(azimuth, 1),
+            'wind_pressure': True,
+            'desc': 'window_{}_{}'.format(state, zone['name']),
+        }
+    else:
+        # plr_test1: perimeter crack leak
+        # Use window_el preset to override frame seal quality
+        win_preset = WINDOW_EL_PRESETS.get(
+            str(window_el), WINDOW_EL_PRESETS["typical"])
+        perimeter = 2.0 * (h + w)
+        return {
+            'dtype': 'plr_test1',
+            'params': {'dP': win_preset['dP'], 'Flow': win_preset['Flow'],
+                       'expt': win_preset['expt']},
+            'zone_a': None,
+            'zone_b': zone['name'],
+            'relHt': round(relHt, 2),
+            'mult': round(perimeter, 2),
+            'wazm': round(azimuth, 1),
+            'wind_pressure': True,
+            'desc': 'window_{}_{}'.format(state, zone['name']),
+        }
+
+def _door_to_opening(match, state):
+    """Convert matched door Brep to opening entry (interior or exterior)."""
+    state = state.lower().strip() if state else "open"
+    if state not in DOOR_STATE_MAP:
+        state = "open"
+    smap = DOOR_STATE_MAP[state]
+
+    h = match['height']
+    w = match['width']
+    eff_ht = smap.get('ht_override', h * smap['ht_factor'])
+    cd = smap['cd']
+
+    if len(match['touching']) >= 2:
+        # Interior door
+        zone_a = match['touching'][0][1]
+        zone_b = match['touching'][1][1]
+        base_z = min(zone_a['bbox_min_z'], zone_b['bbox_min_z'])
+        relHt = match['bb'].Min.Z - base_z
+        if relHt < 0:
+            relHt = 0.0
+        return {
+            'dtype': 'dor_door',
+            'params': {'ht': round(eff_ht, 3), 'wd': round(w, 3), 'cd': cd},
+            'zone_a': zone_a['name'],
+            'zone_b': zone_b['name'],
+            'relHt': round(relHt, 2),
+            'mult': 1.0,
+            'wazm': 0.0,
+            'wind_pressure': False,
+            'desc': 'door_{}_{}_{}'.format(state, zone_a['name'], zone_b['name']),
+        }
+    elif len(match['touching']) == 1:
+        # Exterior door
+        zone = match['touching'][0][1]
+        relHt = match['bb'].Min.Z - zone['bbox_min_z']
+        if relHt < 0:
+            relHt = 0.0
+        azimuth = 0.0
+        normal = match['normal']
+        if normal and abs(normal.Z) < 0.7:
+            azimuth = math.degrees(math.atan2(normal.X, normal.Y))
+            if azimuth < 0:
+                azimuth += 360
+        return {
+            'dtype': 'dor_door',
+            'params': {'ht': round(eff_ht, 3), 'wd': round(w, 3), 'cd': cd},
+            'zone_a': None,
+            'zone_b': zone['name'],
+            'relHt': round(relHt, 2),
+            'mult': 1.0,
+            'wazm': round(azimuth, 1),
+            'wind_pressure': True,
+            'desc': 'door_ext_{}_{}'.format(state, zone['name']),
+        }
+    return None
+
+# --- MAIN ASSEMBLY ---
+
+def build_openings(zones, envelope_el, window_el, interior_el, vertical_el,
+                   window_breps, window_states, door_breps, door_states):
+    """Assemble complete openings list from geometry + presets.
+    
+    Returns (openings_list, counts_dict).
+    """
+    openings = []
+    counts = {'envelope': 0, 'adjacency': 0, 'window': 0,
+              'door_int': 0, 'door_ext': 0, 'frame_leak': 0,
+              'vertical': 0, 'orphan': 0}
+
+    # 1. Envelope faces
+    env_params = ENVELOPE_PRESETS.get(str(envelope_el), ENVELOPE_PRESETS["typical"])
+    envelopes = _detect_envelope_faces(zones)
+    for env in envelopes:
+        openings.append(_envelope_to_opening(env, env_params))
+        counts['envelope'] += 1
+
+    # 2. Adjacencies
+    connections = _detect_adjacencies(zones)
+
+    # 3. Doors (detect + filter adjacencies they replace)
+    door_pairs_covered = set()
+    if door_breps:
+        if not door_states:
+            door_states = ["closed"] * len(door_breps)
+        while len(door_states) < len(door_breps):
+            door_states.append("closed")
+
+        door_matches = _match_breps_to_zones(door_breps, zones)
+        for dm in door_matches:
+            di = dm['index']
+            st = door_states[di] if di < len(door_states) else "closed"
+            entry = _door_to_opening(dm, st)
+            if entry:
+                openings.append(entry)
+                if entry.get('zone_a') and entry.get('zone_b'):
+                    pair = tuple(sorted([entry['zone_a'], entry['zone_b']]))
+                    door_pairs_covered.add(pair)
+                    counts['door_int'] += 1
+                else:
+                    counts['door_ext'] += 1
+
+                # Companion: door frame perimeter leakage (plr_test1).
+                # Always present regardless of door state — air leaks
+                # around the frame even when the door is fully open.
+                dp = entry.get('params', {})
+                door_ht = dp.get('ht', 2.1)
+                door_wd = dp.get('wd', 0.9)
+                perim = 2.0 * (door_ht + door_wd)  # metres of frame crack
+                leak_entry = {
+                    'dtype': 'plr_test1',
+                    'params': dict(DOOR_FRAME_LEAK),
+                    'zone_a': entry.get('zone_a'),
+                    'zone_b': entry.get('zone_b'),
+                    'relHt': entry.get('relHt', 0.0),
+                    'mult': round(perim, 2),
+                    'wazm': entry.get('wazm', 0.0),
+                    'wind_pressure': entry.get('wind_pressure', False),
+                    'desc': entry.get('desc', 'door').replace(
+                        'door_', 'frameleak_', 1),
+                }
+                openings.append(leak_entry)
+                counts['frame_leak'] += 1
+            else:
+                counts['orphan'] += 1
+
+    # 4. Remaining adjacencies (not covered by explicit doors)
+    int_params = INTERIOR_PRESETS.get(str(interior_el), INTERIOR_PRESETS["door_undercut"])
+    for conn in connections:
+        pair = tuple(sorted([conn['zone_a'], conn['zone_b']]))
+        if pair not in door_pairs_covered:
+            entry = _adjacency_to_opening(conn, int_params)
+            openings.append(entry)
+            counts['adjacency'] += 1
+
+            # Companion frame leakage (same logic as explicit doors).
+            # Use standard interior door dimensions for perimeter.
+            adj_ht = int_params.get('ht', 2.1)
+            adj_wd = int_params.get('wd', 0.9)
+            # For undercut (ht=0.01), use standard frame size, not undercut dims
+            frame_ht = max(adj_ht, 2.1)
+            frame_wd = max(adj_wd, 0.9)
+            perim = 2.0 * (frame_ht + frame_wd)
+            leak_entry = {
+                'dtype': 'plr_test1',
+                'params': dict(DOOR_FRAME_LEAK),
+                'zone_a': conn['zone_a'],
+                'zone_b': conn['zone_b'],
+                'relHt': 0.0,
+                'mult': round(perim, 2),
+                'wazm': 0.0,
+                'wind_pressure': False,
+                'desc': 'frameleak_adj_{}_{}'.format(
+                    conn['zone_a'], conn['zone_b']),
+            }
+            openings.append(leak_entry)
+            counts['frame_leak'] += 1
+
+    # 5. Windows (superposed on envelope, per-window state)
+    if window_breps:
+        if not window_states:
+            window_states = ["closed"] * len(window_breps)
+        while len(window_states) < len(window_breps):
+            window_states.append("closed")
+
+        win_matches = _match_breps_to_zones(window_breps, zones)
+        for wm in win_matches:
+            wi = wm['index']
+            st = window_states[wi] if wi < len(window_states) else "closed"
+            entry = _window_to_opening(wm, st, window_el)
+            if entry:
+                openings.append(entry)
+                counts['window'] += 1
+
+    # 6. Vertical connections (floor/ceiling adjacency between levels)
+    n_levels = _detect_levels(zones)
+    if n_levels > 1:
+        vert_conns = _detect_vertical_connections(zones)
+        vert_preset = VERTICAL_PRESETS.get(
+            str(vertical_el), VERTICAL_PRESETS["floor_leak"])
+        for vc in vert_conns:
+            params = dict(vert_preset['params'])
+            # Override level height from detected geometry
+            if vert_preset['dtype'] == 'plr_stair':
+                params['Ht'] = vc['level_ht']
+            elif vert_preset['dtype'] == 'plr_shaft':
+                params['Ht'] = vc['level_ht']
+            openings.append({
+                'dtype': vert_preset['dtype'],
+                'params': params,
+                'zone_a': vc['zone_below'],
+                'zone_b': vc['zone_above'],
+                'relHt': 0.0,
+                'mult': 1.0,
+                'wazm': 0.0,
+                'wind_pressure': False,
+                'desc': 'vertical_{}_{}'.format(
+                    vc['zone_below'], vc['zone_above']),
+            })
+            counts['vertical'] += 1
+
+    return openings, counts
+
+# --- GH EXECUTION ---
+
+if 'breps' not in dir() or not breps:
+    breps = []
+if 'room_names' not in dir() or not room_names:
+    room_names = ["Room{}".format(i + 1) for i in range(len(breps))]
+if 'window_breps' not in dir() or not window_breps:
+    window_breps = []
+if 'window_states' not in dir() or not window_states:
+    window_states = []
+if 'door_breps' not in dir() or not door_breps:
+    door_breps = []
+if 'door_states' not in dir() or not door_states:
+    door_states = []
+if 'envelope_el' not in dir() or not envelope_el:
+    envelope_el = "typical"
+if 'window_el' not in dir() or not window_el:
+    window_el = "typical"
+if 'interior_el' not in dir() or not interior_el:
+    interior_el = "door_undercut"
+if 'vertical_el' not in dir() or not vertical_el:
+    vertical_el = "floor_leak"
+if 'run' not in dir():
+    run = False
+
+STICKY_KEY = "GDS_CONTAM_OPENINGS_CACHE"
+
+openings_json = "[]"
+msg = ""
+
+# Restore cached result when not running
+if not run:
+    cached = sc.sticky.get(STICKY_KEY)
+    if cached:
+        openings_json = cached['json']
+        msg = "[cached] " + cached['msg']
+    else:
+        msg = "Set run=True to analyse geometry. {} Breps connected.".format(len(breps))
+elif not breps:
+    msg = "No Breps connected. Wire room geometry."
+else:
+    try:
+        zones = _extract_zones(breps, room_names)
+        openings, counts = build_openings(
+            zones, envelope_el, window_el, interior_el, vertical_el,
+            window_breps, window_states, door_breps, door_states)
+
+        openings_json = json.dumps(openings, indent=None)
+
+        parts = []
+        total = 0
+        for k in ['envelope', 'adjacency', 'door_int', 'door_ext',
+                   'frame_leak', 'window', 'vertical']:
+            if counts[k] > 0:
+                parts.append("{} {}".format(counts[k], k))
+                total += counts[k]
+        if counts.get('orphan', 0) > 0:
+            parts.append("{} orphan(skipped)".format(counts['orphan']))
+        msg = "{} openings: {}".format(total, ", ".join(parts))
+        
+        # Show active presets in msg for verification
+        env_flow = ENVELOPE_PRESETS.get(str(envelope_el), ENVELOPE_PRESETS["typical"]).get("Flow", "?")
+        win_flow = WINDOW_EL_PRESETS.get(str(window_el), WINDOW_EL_PRESETS["typical"]).get("Flow", "?")
+        msg += "\n env={} (F={}), win_el={} (F={}), win={}, int={}".format(
+            envelope_el, env_flow, window_el, win_flow,
+            window_states[:3] if window_states else "[]",
+            interior_el)
+
+        # Cache for downstream use without re-running
+        sc.sticky[STICKY_KEY] = {'json': openings_json, 'msg': msg}
+
+    except Exception as e:
+        msg = "ERROR: {}".format(str(e))
+        import traceback
+        msg += "\n" + traceback.format_exc()

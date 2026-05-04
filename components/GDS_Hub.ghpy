@@ -1,73 +1,28 @@
 # -*- coding: utf-8 -*-
-# GH GhPython (IronPython 2.7) — GDS Hub Control Panel
-# Multi-module hub: Space → Enclosure → Service → HVAC → Site → Advanced (IDF)
-# Input: RUN (Button) to open UI
-# v62 - Space Module Reorganization, Quick Evaluation view
-# v63 - MODULAR: Presets imported from gds-core package
-#       Run 'pip install gds-core' before using this script
+"""
+GDS Hub
+=======
 
-# ========================= GDS-CORE IMPORTS ==================================
-# Import presets from gds-core package (single source of truth)
-try:
-    from gds import __version__ as GDS_CORE_VERSION
-    from gds.presets.schedules import SCHEDULE_PRESETS, SETPOINT_PRESETS, ACTIVITY_PRESETS
-    from gds.presets.intensities import INTENSITY_DEFAULTS, SHW_PRESETS
-    from gds.presets.hvac import (
-        HVAC_CATEGORIES, HVAC_VINTAGES, HVAC_ECONOMIZER_TYPES, HVAC_RADIANT_TYPES,
-        HVAC_QUICK_PRESETS, HVAC_BUILDING_PRESETS
-    )
-    from gds.presets.renewables import (
-        PV_PRESETS, PV_MODULE_TYPES, PV_MOUNTING_TYPES,
-        BATTERY_PRESETS, WIND_PRESETS, SOLHW_PRESETS
-    )
-    GDS_CORE_AVAILABLE = True
-except ImportError:
-    GDS_CORE_AVAILABLE = False
-    GDS_CORE_VERSION = "N/A"
-    print("WARNING: gds-core not installed. Run 'pip install gds-core' for modular presets.")
-    print("Falling back to embedded presets...")
-    
-    # ======================= FALLBACK PRESETS (if gds-core not installed) ========
-    SCHEDULE_PRESETS = {
-        "Always On": [1.0] * 24,
-        "Always Off": [0.0] * 24,
-        "Office Weekday": [0, 0, 0, 0, 0, 0, 0.1, 0.2, 0.95, 0.95, 0.95, 0.5, 0.95, 0.95, 0.95, 0.95, 0.95, 0.3, 0.1, 0.05, 0, 0, 0, 0],
-        "Office Weekend": [0, 0, 0, 0, 0, 0, 0.05, 0.05, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.05, 0.05, 0, 0, 0, 0, 0, 0, 0, 0],
-        "Retail": [0, 0, 0, 0, 0, 0, 0, 0.1, 0.2, 0.5, 0.8, 0.9, 0.9, 0.9, 0.9, 0.9, 0.9, 0.8, 0.5, 0.2, 0, 0, 0, 0],
-        "Hospital 24/7": [0.8, 0.7, 0.6, 0.6, 0.6, 0.7, 0.8, 0.9, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 0.9, 0.9, 0.9, 0.9, 0.9, 0.8, 0.8],
-        "School": [0, 0, 0, 0, 0, 0, 0.1, 0.5, 0.95, 0.95, 0.95, 0.95, 0.5, 0.95, 0.95, 0.5, 0.1, 0, 0, 0, 0, 0, 0, 0],
-        "Residential": [0.9, 0.9, 0.9, 0.9, 0.9, 0.9, 0.7, 0.4, 0.4, 0.2, 0.2, 0.2, 0.2, 0.2, 0.2, 0.3, 0.5, 0.7, 0.8, 0.9, 0.9, 0.9, 0.9, 0.9],
-    }
-    SETPOINT_PRESETS = {
-        "Office Heating": [15.6, 15.6, 15.6, 15.6, 15.6, 15.6, 18, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 15.6, 15.6, 15.6, 15.6, 15.6, 15.6],
-        "Office Cooling": [29.4, 29.4, 29.4, 29.4, 29.4, 29.4, 26, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 29.4, 29.4, 29.4, 29.4, 29.4, 29.4],
-        "Residential Heating": [18, 18, 18, 18, 18, 18, 20, 21, 21, 18, 18, 18, 18, 18, 18, 18, 21, 21, 21, 21, 21, 20, 18, 18],
-        "Residential Cooling": [28, 28, 28, 28, 28, 28, 26, 25, 25, 28, 28, 28, 28, 28, 28, 28, 25, 25, 25, 25, 25, 26, 28, 28],
-        "Constant 21C": [21] * 24,
-        "Constant 24C": [24] * 24,
-    }
-    ACTIVITY_PRESETS = {
-        "Office Seated": [120] * 24,
-        "Office Light Work": [126] * 24,
-        "Standing/Walking": [150] * 24,
-        "Light Labor": [180] * 24,
-        "Heavy Labor": [300] * 24,
-    }
-    INTENSITY_DEFAULTS = {"Office": {"people_per_area": 0.0565, "lighting_power": 10.76, "equipment_power": 10.76, "infiltration_rate": 0.0003, "ventilation_per_person": 0.006, "ventilation_per_area": 0.0003}}
-    SHW_PRESETS = {"None": {"flow_per_area": 0.0, "target_temp": 49.0, "sensible_fraction": 0.0, "latent_fraction": 0.0}}
-    HVAC_CATEGORIES = {"Ideal Air (Loads Only)": {"description": "Perfect heating/cooling", "class": "IdealAirSystem", "equipment_types": ["IdealAirSystem"], "has_economizer": True, "has_heat_recovery": True, "has_dcv": True}}
-    HVAC_VINTAGES = ["ASHRAE_2019", "ASHRAE_2016", "ASHRAE_2013"]
-    HVAC_ECONOMIZER_TYPES = ["NoEconomizer", "DifferentialDryBulb"]
-    HVAC_RADIANT_TYPES = ["Floor", "Ceiling"]
-    HVAC_QUICK_PRESETS = {}
-    HVAC_BUILDING_PRESETS = {"Ideal Air (Loads Only)": {"class": "IdealAirSystem", "equipment_type": "IdealAirSystem", "vintage": "ASHRAE_2019"}}
-    PV_PRESETS = {"Standard Silicon": {"efficiency": 0.15, "module_type": "Standard", "mounting": "FixedOpenRack", "loss_fraction": 0.14, "tracking_gcr": 0.4}}
-    PV_MODULE_TYPES = ['Standard', 'Premium', 'ThinFilm']
-    PV_MOUNTING_TYPES = ['FixedOpenRack', 'FixedRoofMounted', 'OneAxis', 'TwoAxis']
-    BATTERY_PRESETS = {"Residential Small (5 kWh)": {"capacity_kwh": 5, "power_kw": 3.8, "efficiency": 0.89}}
-    WIND_PRESETS = {"Micro Turbine (1 kW)": {"rated_power_kw": 1.0, "rotor_diameter_m": 2.5, "hub_height_m": 10}}
-    SOLHW_PRESETS = {"Flat Plate - Standard": {"efficiency": 0.50, "collector_type": "FlatPlate"}}
-# =============================================================================
+SPDX-License-Identifier: BSD-3-Clause
+Copyright (c) 2026 SyracuseCoE, Syracuse University. All rights reserved.
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the conditions stated in the
+LICENSE file distributed with this project are met.
+
+Author: Chengbo Du <cdu113@syr.edu>
+
+Tabbed input panel for GDS workflows. Six modules:
+
+    1. Space      - Geometry, conditioning status, program inputs
+    2. Enclosure  - Aperture and door definition
+    3. Service    - Program assembly, service hot water, thermal comfort
+    4. HVAC       - HVAC system selection from templates
+    5. Site       - Site, weather, PV, solar hot water
+    6. Advanced   - Battery, wind, IDF injection and preview
+
+Module outputs are written to named GH components on the canvas.
+"""
 
 # --------------------------- CONFIG ------------------------------------------
 # Space Module
@@ -84,7 +39,7 @@ NAME_SPACE_OUTPUTS = ["Design Parameters", "Control Parameters",
 NAME_PERFORMANCE   = "Performance"
 
 # Enclosure Module
-NAME_PREVIEW_BREP  = "GDS_Preview"
+NAME_PREVIEW_BREP  = "GDS_Preview"  # Unified preview for Enclosure & Service modules
 NAME_APERTURE_SRF  = "aperture surfaces"
 NAME_APERTURE_SYNC = "ap_sync"
 NAME_DOOR_SRF      = "door surfaces"
@@ -96,43 +51,41 @@ NAME_ENV_PERF      = "GDS_Envelope_Performance"
 # Service Module
 NAME_HB_ROOMS_IN = "HB_Rooms"
 NAME_PROGRAM_OUTPUT = "GDS_Program"
-NAME_CUSTOM_SCHEDULES = "GDS_Custom_Schedules"
+NAME_SHW_SYSTEM = "GDS_SHW_System"  # Panel for SHW equipment type output
+SHW_STICKY_KEY = "GDS_SHW_SYSTEM"  # sc.sticky key for Refiner to read
+NAME_CUSTOM_SCHEDULES = "GDS_Custom_Schedules"  # Panel to store custom schedules JSON
 
-# Space Module - Conditioning Status (v62)
-NAME_COND_STATUS = "GDS_Cond_Status"
+# Space Module - Conditioning Status
+NAME_COND_STATUS = "GDS_Cond_Status"  # Data component for conditioning status (boolean list)
 
 # Site Module
 NAME_SITE_CONTEXT  = "site_context"
 NAME_SITE_INDEX    = "site_index"
 NAME_SITE_NAME     = "site_name"
 NAME_SITE_BUTTON   = "site_overwrite"
-NAME_INC_CONTEXT   = "IncCont?"
+NAME_INC_CONTEXT   = "IncCont?"  # Toggle for including context geometry in HB Model
 NAME_WEATHER_PATH  = "weather_path"
 NAME_SITE_OUTPUTS  = ["GDS_Site_Design", "GDS_Site_Control",
                       "GDS_Site_State", "GDS_Site_Interface"]
 NAME_SITE_PERF     = "GDS_Site_Performance"
 
 # HVAC Module
-NAME_HVAC_ROOMS_IN  = "HB_Rooms"
-NAME_HVAC_ROOMS_OUT = "HB_Rooms_HVAC"
-NAME_HVAC_SYSTEM    = "HVAC_System"
-HVAC_CONFIG_KEY     = "GDS_HVAC_CONFIG"
+NAME_HVAC_ROOMS_IN  = "HB_Rooms"        # Input: HB Rooms (same as Schedule module)
+NAME_HVAC_ROOMS_OUT = "HB_Rooms_HVAC"   # Output: Rooms with HVAC assigned
+NAME_HVAC_SYSTEM    = "HVAC_System"     # Output: HVAC system object
+HVAC_CONFIG_KEY     = "GDS_HVAC_CONFIG" # Storage key for HVAC config (used by GDSGBE)
 
 # Advanced (IDF Injection) Module
-NAME_IDF_INJECTION  = "GDS_IDF_Injection"
+NAME_IDF_INJECTION  = "GDS_IDF_Injection"  # Panel to receive IDF strings for injection
 
-# Window title with version
-GDS_HUB_VERSION = "v63"
-if GDS_CORE_AVAILABLE:
-    WINDOW_TITLE = "GDS Hub {} (core {})".format(GDS_HUB_VERSION, GDS_CORE_VERSION)
-else:
-    WINDOW_TITLE = "GDS Hub {} (standalone)".format(GDS_HUB_VERSION)
+# Thermal Comfort Settings
+NAME_COMFORT_SETTINGS = "GDS_Comfort_Settings"  # Panel for comfort simulation settings
 
+WINDOW_TITLE    = "GDS - Building Hub"
 WINDOW_SIZE     = (1050, 780)
 DUP_DEFAULT     = 2
 ACH_DEFAULT     = 0.5
 OUT_MAX_ITEMS   = 200
-HVAC_DEFAULT_KEY = "GDS_HVAC_DEFAULT"
 # -----------------------------------------------------------------------------
 
 import Eto.Forms as Forms
@@ -148,13 +101,562 @@ import scriptcontext as sc
 import System
 import math
 import json
+import os
 
 DOC = ghenv.Component.OnPingDocument()
 KEY = "GDS_HubPanel_STICKY"
+SERVICE_STORAGE_KEY = "GDS_SERVICE_STATE"  # sc.sticky key for Service Module persistence
 
 RESULT_BG_COLOR = Drawing.Color.FromArgb(245, 247, 250)
 
-# ======================= GDS SCHEDULE/PROGRAM PARSER =========================
+# --- SCHEDULE PRESETS ---
+SCHEDULE_PRESETS = {
+    "Always On": [1.0] * 24,
+    "Always Off": [0.0] * 24,
+    "Office Weekday": [0, 0, 0, 0, 0, 0, 0.1, 0.2, 0.95, 0.95, 0.95, 0.5, 0.95, 0.95, 0.95, 0.95, 0.95, 0.3, 0.1, 0.05, 0, 0, 0, 0],
+    "Office Weekend": [0, 0, 0, 0, 0, 0, 0.05, 0.05, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.05, 0.05, 0, 0, 0, 0, 0, 0, 0, 0],
+    "Retail": [0, 0, 0, 0, 0, 0, 0, 0.1, 0.2, 0.5, 0.8, 0.9, 0.9, 0.9, 0.9, 0.9, 0.9, 0.8, 0.5, 0.2, 0, 0, 0, 0],
+    "Hospital 24/7": [0.8, 0.7, 0.6, 0.6, 0.6, 0.7, 0.8, 0.9, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 0.9, 0.9, 0.9, 0.9, 0.9, 0.8, 0.8],
+    "School": [0, 0, 0, 0, 0, 0, 0.1, 0.5, 0.95, 0.95, 0.95, 0.95, 0.5, 0.95, 0.95, 0.5, 0.1, 0, 0, 0, 0, 0, 0, 0],
+    "Residential": [0.9, 0.9, 0.9, 0.9, 0.9, 0.9, 0.7, 0.4, 0.4, 0.2, 0.2, 0.2, 0.2, 0.2, 0.2, 0.3, 0.5, 0.7, 0.8, 0.9, 0.9, 0.9, 0.9, 0.9],
+}
+
+SETPOINT_PRESETS = {
+    "Office Heating": [15.6, 15.6, 15.6, 15.6, 15.6, 15.6, 18, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 15.6, 15.6, 15.6, 15.6, 15.6, 15.6],
+    "Office Cooling": [29.4, 29.4, 29.4, 29.4, 29.4, 29.4, 26, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 29.4, 29.4, 29.4, 29.4, 29.4, 29.4],
+    "Residential Heating": [18, 18, 18, 18, 18, 18, 20, 21, 21, 18, 18, 18, 18, 18, 18, 18, 21, 21, 21, 21, 21, 20, 18, 18],
+    "Residential Cooling": [28, 28, 28, 28, 28, 28, 26, 25, 25, 28, 28, 28, 28, 28, 28, 28, 25, 25, 25, 25, 25, 26, 28, 28],
+    "Constant 21C": [21] * 24,
+    "Constant 24C": [24] * 24,
+}
+
+ACTIVITY_PRESETS = {
+    "Office Seated": [120] * 24,
+    "Office Light Work": [126] * 24,
+    "Standing/Walking": [150] * 24,
+    "Light Labor": [180] * 24,
+    "Heavy Labor": [300] * 24,
+}
+
+INTENSITY_DEFAULTS = {
+    "Office": {
+        "people_per_area": 0.0565,
+        "lighting_power": 10.76,
+        "equipment_power": 10.76,
+        "infiltration_rate": 0.0003,
+        "ventilation_per_person": 0.006,
+        "ventilation_per_area": 0.0003,
+    },
+    "Retail": {
+        "people_per_area": 0.108,
+        "lighting_power": 16.0,
+        "equipment_power": 5.0,
+        "infiltration_rate": 0.0003,
+        "ventilation_per_person": 0.0075,
+        "ventilation_per_area": 0.0006,
+    },
+    "Residential": {
+        "people_per_area": 0.04,
+        "lighting_power": 6.0,
+        "equipment_power": 5.0,
+        "infiltration_rate": 0.0003,
+        "ventilation_per_person": 0.0025,
+        "ventilation_per_area": 0.0003,
+    },
+    "Laboratory": {
+        "people_per_area": 0.05,
+        "lighting_power": 14.0,
+        "equipment_power": 20.0,
+        "infiltration_rate": 0.0003,
+        "ventilation_per_person": 0.006,
+        "ventilation_per_area": 0.0009,
+    },
+    "Hospital": {
+        "people_per_area": 0.1,
+        "lighting_power": 12.0,
+        "equipment_power": 15.0,
+        "infiltration_rate": 0.0003,
+        "ventilation_per_person": 0.006,
+        "ventilation_per_area": 0.0006,
+    },
+}
+
+# --- SERVICE HOT WATER PRESETS ---
+SHW_PRESETS = {
+    "None": {
+        "flow_per_area": 0.0,
+        "target_temp": 49.0,
+        "sensible_fraction": 0.0,
+        "latent_fraction": 0.0,
+    },
+    "Residential": {
+        "flow_per_area": 0.05,      # L/h/m² 
+        "target_temp": 49.0,        # °C (120°F)
+        "sensible_fraction": 0.2,
+        "latent_fraction": 0.05,
+    },
+    "Residential - ABC Baseline": {
+        "flow_per_area": 0.05,
+        "target_temp": 48.9,        # 120°F from paper
+        "sensible_fraction": 0.2,
+        "latent_fraction": 0.05,
+    },
+    "Office": {
+        "flow_per_area": 0.01,
+        "target_temp": 43.0,
+        "sensible_fraction": 0.2,
+        "latent_fraction": 0.05,
+    },
+    "Hotel": {
+        "flow_per_area": 0.08,
+        "target_temp": 49.0,
+        "sensible_fraction": 0.2,
+        "latent_fraction": 0.05,
+    },
+}
+
+# SHW equipment types (determines fuel source for domestic hot water)
+SHW_EQUIPMENT_TYPES = [
+    "Gas_WaterHeater",          # Natural gas (HB default)
+    "Electric_WaterHeater",     # Electric resistance
+    "HeatPump_WaterHeater",     # Electric heat pump (high COP)
+    "Gas_TanklessHeater",       # Gas tankless/instantaneous
+    "Electric_TanklessHeater",  # Electric tankless/instantaneous
+]
+
+# Tank parameter defaults per equipment type (for conditional UI)
+SHW_EQUIPMENT_DEFAULTS = {
+    "Gas_WaterHeater":          {"efficiency": 0.8,  "tank_ua": 6.0, "has_tank": True},
+    "Electric_WaterHeater":     {"efficiency": 1.0,  "tank_ua": 6.0, "has_tank": True},
+    "HeatPump_WaterHeater":     {"efficiency": 3.5,  "tank_ua": 6.0, "has_tank": True},
+    "Gas_TanklessHeater":       {"efficiency": 0.82, "tank_ua": 0.0, "has_tank": False},
+    "Electric_TanklessHeater":  {"efficiency": 1.0,  "tank_ua": 0.0, "has_tank": False},
+}
+
+# --- HVAC SYSTEM TEMPLATES ---
+HVAC_CATEGORIES = {
+    "Ideal Air (Loads Only)": {
+        "description": "Perfect heating/cooling for load calculations",
+        "class": "IdealAirSystem",
+        "equipment_types": ["IdealAirSystem"],
+        "has_economizer": True,
+        "has_heat_recovery": True,
+        "has_dcv": True,
+    },
+    "All-Air: VAV": {
+        "description": "Variable Air Volume - large commercial buildings",
+        "class": "VAV",
+        "equipment_types": [
+            "VAV_Chiller_Boiler", "VAV_Chiller_ASHP", "VAV_Chiller_DHW",
+            "VAV_Chiller_PFP", "VAV_Chiller_GasCoil",
+            "VAV_ACChiller_Boiler", "VAV_ACChiller_ASHP", "VAV_ACChiller_DHW",
+            "VAV_DCW_Boiler", "VAV_DCW_ASHP", "VAV_DCW_DHW"
+        ],
+        "has_economizer": True,
+        "has_heat_recovery": True,
+        "has_dcv": True,
+    },
+    "All-Air: PVAV": {
+        "description": "Packaged VAV - medium commercial",
+        "class": "PVAV",
+        "equipment_types": [
+            "PVAV_Boiler", "PVAV_ASHP", "PVAV_DHW",
+            "PVAV_PFP", "PVAV_BoilerElectricReheat"
+        ],
+        "has_economizer": True,
+        "has_heat_recovery": True,
+        "has_dcv": True,
+    },
+    "All-Air: PSZ": {
+        "description": "Packaged Single Zone - small commercial/retail",
+        "class": "PSZ",
+        "equipment_types": [
+            "PSZAC_ElectricBaseboard", "PSZAC_BoilerBaseboard", "PSZAC_GasHeaters",
+            "PSZAC_ElectricCoil", "PSZAC_GasCoil", "PSZAC_Boiler", "PSZAC_ASHP",
+            "PSZAC", "PSZHP"
+        ],
+        "has_economizer": True,
+        "has_heat_recovery": True,
+        "has_dcv": True,
+    },
+    "DOAS + FCU": {
+        "description": "Dedicated OA + Fan Coil Units - offices, hotels",
+        "class": "FCUwithDOAS",
+        "equipment_types": [
+            "DOAS_FCU_Chiller_Boiler", "DOAS_FCU_Chiller_ASHP", "DOAS_FCU_Chiller_DHW",
+            "DOAS_FCU_ACChiller_Boiler", "DOAS_FCU_ACChiller_ASHP",
+            "DOAS_FCU_DCW_Boiler", "DOAS_FCU_DCW_ASHP"
+        ],
+        "has_economizer": False,
+        "has_heat_recovery": True,
+        "has_dcv": True,
+    },
+    "DOAS + VRF": {
+        "description": "Dedicated OA + Variable Refrigerant Flow",
+        "class": "VRFwithDOAS",
+        "equipment_types": ["DOAS_VRF"],
+        "has_economizer": False,
+        "has_heat_recovery": True,
+        "has_dcv": True,
+    },
+    "DOAS + Radiant": {
+        "description": "Dedicated OA + Radiant Floors/Ceilings - high efficiency",
+        "class": "RadiantwithDOAS",
+        "equipment_types": [
+            "DOAS_Radiant_Chiller_Boiler", "DOAS_Radiant_Chiller_ASHP",
+            "DOAS_Radiant_ACChiller_Boiler", "DOAS_Radiant_DCW_Boiler"
+        ],
+        "has_economizer": False,
+        "has_heat_recovery": True,
+        "has_dcv": True,
+        "has_radiant_type": True,
+    },
+    "DOAS + WSHP": {
+        "description": "Dedicated OA + Water Source Heat Pumps",
+        "class": "WSHPwithDOAS",
+        "equipment_types": [
+            "DOAS_WSHP_FluidCooler_Boiler", "DOAS_WSHP_CoolingTower_Boiler",
+            "DOAS_WSHP_GSHP", "DOAS_WSHP_DCW_DHW"
+        ],
+        "has_economizer": False,
+        "has_heat_recovery": True,
+        "has_dcv": True,
+    },
+    "HeatCool: Residential": {
+        "description": "Residential AC/HP/Furnace - no ventilation air",
+        "class": "Residential",
+        "equipment_types": [
+            "ResidentialAC_ElectricBaseboard", "ResidentialAC_BoilerBaseboard",
+            "ResidentialAC_ResidentialFurnace", "ResidentialAC",
+            "ResidentialHP", "ResidentialHPNoCool", "ResidentialFurnace"
+        ],
+        "has_economizer": False,
+        "has_heat_recovery": False,
+        "has_dcv": False,
+    },
+    "HeatCool: Baseboard": {
+        "description": "Baseboard heating only - no cooling/ventilation",
+        "class": "Baseboard",
+        "equipment_types": [
+            "ElectricBaseboard", "BoilerBaseboard", "ASHPBaseboard", "DHWBaseboard"
+        ],
+        "has_economizer": False,
+        "has_heat_recovery": False,
+        "has_dcv": False,
+    },
+    "HeatCool: Radiant": {
+        "description": "Radiant floors/ceilings - no ventilation",
+        "class": "Radiant",
+        "equipment_types": [
+            "Radiant_Chiller_Boiler", "Radiant_Chiller_ASHP",
+            "Radiant_ACChiller_Boiler", "Radiant_DCW_Boiler"
+        ],
+        "has_economizer": False,
+        "has_heat_recovery": False,
+        "has_dcv": False,
+        "has_radiant_type": True,
+    },
+}
+
+HVAC_VINTAGES = [
+    "ASHRAE_2019", "ASHRAE_2016", "ASHRAE_2013", "ASHRAE_2010",
+    "ASHRAE_2007", "ASHRAE_2004", "DOE_Ref_1980_2004", "DOE_Ref_Pre_1980"
+]
+
+HVAC_ECONOMIZER_TYPES = [
+    "NoEconomizer", "DifferentialDryBulb", "DifferentialEnthalpy",
+    "DifferentialDryBulbAndEnthalpy", "FixedDryBulb", "FixedEnthalpy"
+]
+
+HVAC_RADIANT_TYPES = ["Floor", "Ceiling", "FloorWithCarpet", "CeilingMetalPanel"]
+
+HVAC_QUICK_PRESETS = {
+    "Office Standard": {
+        "category": "All-Air: VAV",
+        "equipment_type": "VAV_Chiller_Boiler",
+        "vintage": "ASHRAE_2019",
+        "economizer": "DifferentialDryBulb",
+        "sensible_hr": 0.0,
+        "latent_hr": 0.0,
+        "dcv": False,
+    },
+    "Office High-Eff": {
+        "category": "DOAS + FCU",
+        "equipment_type": "DOAS_FCU_Chiller_Boiler",
+        "vintage": "ASHRAE_2019",
+        "economizer": "NoEconomizer",
+        "sensible_hr": 0.7,
+        "latent_hr": 0.65,
+        "dcv": True,
+    },
+    "Retail": {
+        "category": "All-Air: PSZ",
+        "equipment_type": "PSZAC_GasCoil",
+        "vintage": "ASHRAE_2019",
+        "economizer": "DifferentialDryBulb",
+        "sensible_hr": 0.0,
+        "latent_hr": 0.0,
+        "dcv": False,
+    },
+    "Residential": {
+        "category": "HeatCool: Residential",
+        "equipment_type": "ResidentialHP",
+        "vintage": "ASHRAE_2019",
+        "economizer": "NoEconomizer",
+        "sensible_hr": 0.0,
+        "latent_hr": 0.0,
+        "dcv": False,
+    },
+    "Lab High-Vent": {
+        "category": "All-Air: VAV",
+        "equipment_type": "VAV_Chiller_Boiler",
+        "vintage": "ASHRAE_2019",
+        "economizer": "NoEconomizer",
+        "sensible_hr": 0.7,
+        "latent_hr": 0.65,
+        "dcv": False,
+    },
+    "Hospital": {
+        "category": "All-Air: VAV",
+        "equipment_type": "VAV_Chiller_Boiler",
+        "vintage": "ASHRAE_2019",
+        "economizer": "NoEconomizer",
+        "sensible_hr": 0.0,
+        "latent_hr": 0.0,
+        "dcv": False,
+    },
+    "Radiant High-Eff": {
+        "category": "DOAS + Radiant",
+        "equipment_type": "DOAS_Radiant_Chiller_Boiler",
+        "vintage": "ASHRAE_2019",
+        "economizer": "NoEconomizer",
+        "sensible_hr": 0.75,
+        "latent_hr": 0.7,
+        "dcv": True,
+        "radiant_type": "Floor",
+    },
+}
+
+# Building type presets for simplified HVAC module
+HVAC_BUILDING_PRESETS = {
+    "Office - Standard": {
+        "description": "VAV system with chiller/boiler",
+        "class": "VAV",
+        "equipment_type": "VAV_Chiller_Boiler",
+        "vintage": "ASHRAE_2019",
+        "economizer_type": "DifferentialDryBulb",
+        "sensible_heat_recovery": 0.0,
+        "latent_heat_recovery": 0.0,
+        "demand_controlled_ventilation": True,
+    },
+    "Office - High Efficiency": {
+        "description": "DOAS + FCU with heat recovery",
+        "class": "FCUwithDOAS",
+        "equipment_type": "DOAS_FCU_Chiller_Boiler",
+        "vintage": "ASHRAE_2019",
+        "economizer_type": "NoEconomizer",
+        "sensible_heat_recovery": 0.7,
+        "latent_heat_recovery": 0.65,
+        "demand_controlled_ventilation": True,
+    },
+    "Residential": {
+        "description": "Residential heat pump",
+        "class": "Residential",
+        "equipment_type": "ResidentialHP",
+        "vintage": "ASHRAE_2019",
+        "economizer_type": "NoEconomizer",
+        "sensible_heat_recovery": 0.0,
+        "latent_heat_recovery": 0.0,
+        "demand_controlled_ventilation": False,
+    },
+    "Retail": {
+        "description": "Packaged rooftop units",
+        "class": "PSZ",
+        "equipment_type": "PSZAC_GasCoil",
+        "vintage": "ASHRAE_2019",
+        "economizer_type": "DifferentialDryBulb",
+        "sensible_heat_recovery": 0.0,
+        "latent_heat_recovery": 0.0,
+        "demand_controlled_ventilation": False,
+    },
+    "Hotel": {
+        "description": "DOAS + FCU for guest rooms",
+        "class": "FCUwithDOAS",
+        "equipment_type": "DOAS_FCU_Chiller_Boiler",
+        "vintage": "ASHRAE_2019",
+        "economizer_type": "NoEconomizer",
+        "sensible_heat_recovery": 0.6,
+        "latent_heat_recovery": 0.5,
+        "demand_controlled_ventilation": True,
+    },
+    "School": {
+        "description": "DOAS + VRF for classrooms",
+        "class": "VRFwithDOAS",
+        "equipment_type": "DOAS_VRF",
+        "vintage": "ASHRAE_2019",
+        "economizer_type": "NoEconomizer",
+        "sensible_heat_recovery": 0.6,
+        "latent_heat_recovery": 0.5,
+        "demand_controlled_ventilation": True,
+    },
+    "Hospital": {
+        "description": "VAV with high ventilation",
+        "class": "VAV",
+        "equipment_type": "VAV_Chiller_Boiler",
+        "vintage": "ASHRAE_2019",
+        "economizer_type": "NoEconomizer",
+        "sensible_heat_recovery": 0.7,
+        "latent_heat_recovery": 0.65,
+        "demand_controlled_ventilation": False,
+    },
+    "Ideal Air (Loads Only)": {
+        "description": "Perfect HVAC for load calculations",
+        "class": "IdealAirSystem",
+        "equipment_type": "IdealAirSystem",
+        "vintage": "ASHRAE_2019",
+        "economizer_type": "NoEconomizer",
+        "sensible_heat_recovery": 0.0,
+        "latent_heat_recovery": 0.0,
+        "demand_controlled_ventilation": False,
+    },
+}
+
+HVAC_DEFAULT_KEY = "GDS_HVAC_DEFAULT"
+
+# --- PHOTOVOLTAIC PRESETS ---
+PV_PRESETS = {
+    "Standard Silicon": {
+        "description": "Typical poly/mono-crystalline (14-17% eff)",
+        "efficiency": 0.15,
+        "module_type": "Standard",
+        "mounting": "FixedOpenRack",
+        "loss_fraction": 0.14,
+        "tracking_gcr": 0.4,
+    },
+    "Premium Silicon": {
+        "description": "High-efficiency mono-crystalline (18-20% eff)",
+        "efficiency": 0.19,
+        "module_type": "Premium", 
+        "mounting": "FixedOpenRack",
+        "loss_fraction": 0.12,
+        "tracking_gcr": 0.4,
+    },
+    "Thin Film": {
+        "description": "Amorphous silicon or CdTe (<12% eff)",
+        "efficiency": 0.10,
+        "module_type": "ThinFilm",
+        "mounting": "FixedOpenRack",
+        "loss_fraction": 0.16,
+        "tracking_gcr": 0.4,
+    },
+    "BIPV Facade": {
+        "description": "Building-integrated on vertical facade",
+        "efficiency": 0.12,
+        "module_type": "Standard",
+        "mounting": "FixedRoofMounted",
+        "loss_fraction": 0.18,
+        "tracking_gcr": 0.4,
+    },
+    "Roof Flush Mount": {
+        "description": "Panels flush with roof surface",
+        "efficiency": 0.16,
+        "module_type": "Standard",
+        "mounting": "FixedRoofMounted",
+        "loss_fraction": 0.15,
+        "tracking_gcr": 0.4,
+    },
+    "Single-Axis Tracker": {
+        "description": "Ground-mount with E-W tracking",
+        "efficiency": 0.17,
+        "module_type": "Premium",
+        "mounting": "OneAxis",
+        "loss_fraction": 0.12,
+        "tracking_gcr": 0.4,
+    },
+    "Dual-Axis Tracker": {
+        "description": "Full sun tracking (highest yield)",
+        "efficiency": 0.18,
+        "module_type": "Premium",
+        "mounting": "TwoAxis",
+        "loss_fraction": 0.10,
+        "tracking_gcr": 0.4,
+    },
+}
+
+PV_MODULE_TYPES = ['Standard', 'Premium', 'ThinFilm']
+PV_MOUNTING_TYPES = ['FixedOpenRack', 'FixedRoofMounted', 'OneAxis', 
+                     'OneAxisBacktracking', 'TwoAxis']
+
+# --- BATTERY PRESETS ---
+BATTERY_PRESETS = {
+    "Residential Small (5 kWh)": {
+        "capacity_kwh": 5,
+        "power_kw": 3.8,
+        "efficiency": 0.89,
+    },
+    "Residential Medium (13.5 kWh)": {
+        "capacity_kwh": 13.5,
+        "power_kw": 5.0,
+        "efficiency": 0.90,
+    },
+    "Residential Large (20 kWh)": {
+        "capacity_kwh": 20,
+        "power_kw": 10.0,
+        "efficiency": 0.90,
+    },
+    "Commercial Small (50 kWh)": {
+        "capacity_kwh": 50,
+        "power_kw": 25,
+        "efficiency": 0.88,
+    },
+    "Commercial Medium (200 kWh)": {
+        "capacity_kwh": 200,
+        "power_kw": 100,
+        "efficiency": 0.88,
+    },
+}
+
+# --- WIND TURBINE PRESETS ---
+WIND_PRESETS = {
+    "Micro Turbine (1 kW)": {
+        "rated_power_kw": 1.0,
+        "rotor_diameter_m": 2.5,
+        "hub_height_m": 10,
+    },
+    "Small Turbine (5 kW)": {
+        "rated_power_kw": 5.0,
+        "rotor_diameter_m": 5.0,
+        "hub_height_m": 18,
+    },
+    "Medium Turbine (10 kW)": {
+        "rated_power_kw": 10.0,
+        "rotor_diameter_m": 7.0,
+        "hub_height_m": 25,
+    },
+    "VAWT Rooftop (2 kW)": {
+        "rated_power_kw": 2.0,
+        "rotor_diameter_m": 2.0,
+        "hub_height_m": 5,
+    },
+}
+
+# --- SOLAR HOT WATER PRESETS ---
+SOLHW_PRESETS = {
+    "Flat Plate - Standard": {
+        "efficiency": 0.50,
+        "collector_type": "FlatPlate",
+    },
+    "Flat Plate - Premium": {
+        "efficiency": 0.65,
+        "collector_type": "FlatPlate",
+    },
+    "Evacuated Tube": {
+        "efficiency": 0.55,
+        "collector_type": "TubularEvacuated",
+    },
+}
+
+# --- GDS SCHEDULE/PROGRAM PARSER ---
 class GDSScheduleParser:
     """Parse GDS module database for schedules and program types"""
     
@@ -176,6 +678,9 @@ class GDSScheduleParser:
             
             modules = data.get('modules', {})
             
+            # Temporary raw storage for schedule grouping
+            self._raw_schedule_entries = {}
+            
             for module_key, module_data in modules.items():
                 if module_key.startswith('schedule.'):
                     self._parse_schedule_module(module_key, module_data)
@@ -183,12 +688,24 @@ class GDSScheduleParser:
                     self._parse_program_module(module_key, module_data)
                 elif module_key.startswith('loads.'):
                     self._parse_loads_module(module_key, module_data)
+            
+            # Post-processing: resolve seasonal groups from # convention
+            self._resolve_seasonal_groups()
                     
         except Exception as e:
             print("GDS Schedule Parser error: {}".format(e))
     
     def _parse_schedule_module(self, module_key, module_data):
-        """Parse a schedule module from GDS JSON"""
+        """Parse a schedule module from GDS JSON into raw storage.
+        
+        Seasonal convention:
+            schedule.XX       — standalone or base (default) schedule
+            schedule.XX#1     — seasonal override #1 (must have start_date/end_date)
+            schedule.XX#2     — seasonal override #2
+            ...
+        If no #-suffixed companions exist, the base works as a plain entry.
+        If companions exist, they are composed into a single seasonal schedule.
+        """
         short_key = module_key.replace('schedule.', '')
         meta = module_data.get('meta', {})
         display_name = meta.get('display_name', short_key)
@@ -202,20 +719,152 @@ class GDSScheduleParser:
         if hourly and len(hourly) == 24:
             schedule_type = design.get('schedule_type', 'fractional')
             
-            if schedule_type in ['temperature', 'setpoint']:
-                self.setpoints[display_name] = {
-                    'identifier': short_key,
-                    'values': hourly,
-                    'type': schedule_type,
-                    'weekend_values': design.get('weekend_values', hourly)
-                }
+            entry = {
+                'module_key': module_key,
+                'identifier': short_key,
+                'display_name': display_name,
+                'values': hourly,
+                'type': schedule_type,
+                'weekend_values': design.get('weekend_values', hourly),
+                'start_date': design.get('start_date', None),
+                'end_date': design.get('end_date', None),
+                'label': meta.get('description', display_name),
+            }
+            
+            # Store by short_key (preserves #suffix)
+            self._raw_schedule_entries[short_key] = entry
+    
+    def _resolve_seasonal_groups(self):
+        """Group #-suffixed schedule entries into seasonal composites.
+        
+        Logic:
+          1. Split each key on '#': base_name and suffix (if any).
+          2. Entries with no '#' and no companions are standalone — stored as-is.
+          3. If companions (same base, different #suffix) exist:
+             - The entry with no suffix or #0 is the BASE (default/fallback).
+             - Entries with #1, #2, ... are OVERRIDES (must have start_date + end_date).
+             - The composed entry gets a 'seasonal_rules' list.
+             - Only the BASE display_name appears in dropdown (with [S] appended by UI).
+          4. Validation: overrides without dates raise a warning.
+        """
+        # Group by base name
+        groups = {}  # base_name -> {'base': entry_or_None, 'overrides': [entries]}
+        
+        for short_key, entry in self._raw_schedule_entries.items():
+            if '#' in short_key:
+                parts = short_key.split('#', 1)
+                base_name = parts[0]
+                suffix = parts[1]
             else:
-                self.schedules[display_name] = {
-                    'identifier': short_key,
-                    'values': hourly,
-                    'type': schedule_type,
-                    'weekend_values': design.get('weekend_values', hourly)
-                }
+                base_name = short_key
+                suffix = None
+            
+            if base_name not in groups:
+                groups[base_name] = {'base': None, 'overrides': []}
+            
+            if suffix is None or suffix == '0':
+                groups[base_name]['base'] = entry
+            else:
+                entry['_suffix'] = suffix
+                groups[base_name]['overrides'].append(entry)
+        
+        # Resolve each group
+        for base_name, group in groups.items():
+            base = group['base']
+            overrides = group['overrides']
+            
+            if not overrides:
+                # --- Standalone entry (no companions) — store as-is ---
+                if base is None:
+                    continue
+                self._store_schedule_entry(base, seasonal_rules=None)
+            else:
+                # --- Seasonal group ---
+                if base is None:
+                    # No base found — use the first override as base and warn
+                    print("GDS Schedule Warning: seasonal group '{}' has no base "
+                          "entry (schedule.{} or schedule.{}#0). Using first override "
+                          "as default.".format(base_name, base_name, base_name))
+                    base = overrides.pop(0)
+                
+                # Validate overrides: each must have start_date and end_date
+                valid_overrides = []
+                for ovr in overrides:
+                    if ovr['start_date'] and ovr['end_date']:
+                        valid_overrides.append(ovr)
+                    else:
+                        print("GDS Schedule Warning: override '{}' missing start_date/"
+                              "end_date — skipped.".format(ovr['identifier']))
+                
+                # Check for date range overlaps (advisory only)
+                self._check_date_overlaps(base_name, valid_overrides)
+                
+                # Build seasonal_rules list
+                seasonal_rules = []
+                for ovr in valid_overrides:
+                    seasonal_rules.append({
+                        'label': ovr.get('_suffix', ovr['display_name']),
+                        'weekday_values': ovr['values'],
+                        'weekend_values': ovr['weekend_values'],
+                        'start_date': ovr['start_date'],
+                        'end_date': ovr['end_date'],
+                    })
+                
+                self._store_schedule_entry(base, seasonal_rules=seasonal_rules)
+        
+        # Clean up temporary storage
+        del self._raw_schedule_entries
+    
+    def _store_schedule_entry(self, entry, seasonal_rules=None):
+        """Store a resolved schedule entry into self.schedules or self.setpoints."""
+        display_name = entry['display_name']
+        schedule_type = entry['type']
+        
+        data = {
+            'identifier': entry['identifier'],
+            'values': entry['values'],
+            'type': schedule_type,
+            'weekend_values': entry['weekend_values'],
+        }
+        
+        if seasonal_rules:
+            data['seasonal_rules'] = seasonal_rules
+            data['is_seasonal'] = True
+        
+        if schedule_type in ['temperature', 'setpoint']:
+            self.setpoints[display_name] = data
+        else:
+            self.schedules[display_name] = data
+    
+    def _check_date_overlaps(self, base_name, overrides):
+        """Advisory check for date range overlaps between overrides."""
+        if len(overrides) < 2:
+            return
+        
+        def to_doy(md):
+            """Approximate month-day to day-of-year."""
+            month_days = [0, 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334]
+            return month_days[md[0] - 1] + md[1]
+        
+        # Expand ranges (handle cross-year by splitting)
+        ranges = []
+        for ovr in overrides:
+            sd, ed = ovr['start_date'], ovr['end_date']
+            s_doy, e_doy = to_doy(sd), to_doy(ed)
+            if s_doy <= e_doy:
+                ranges.append((s_doy, e_doy, ovr.get('_suffix', '?')))
+            else:
+                # Cross-year: Dec→Jan
+                ranges.append((s_doy, 365, ovr.get('_suffix', '?')))
+                ranges.append((1, e_doy, ovr.get('_suffix', '?')))
+        
+        # Sort and check pairwise overlap
+        ranges.sort()
+        for i in range(len(ranges) - 1):
+            if ranges[i][1] >= ranges[i + 1][0]:
+                print("GDS Schedule Warning: date overlap in seasonal group '{}' "
+                      "between #{} and #{}.".format(
+                          base_name, ranges[i][2], ranges[i + 1][2]))
     
     def _parse_program_module(self, module_key, module_data):
         """Parse a program type module from GDS JSON"""
@@ -301,14 +950,34 @@ class GDSScheduleParser:
             return self.schedules[display_name]['values']
         return None
     
+    def get_schedule_full_data(self, display_name):
+        """Get full schedule data including seasonal_rules if present.
+        
+        Returns dict with 'values', 'weekend_values', and optionally
+        'seasonal_rules' (list of override dicts). Returns None if not found.
+        """
+        if display_name in self.schedules:
+            return self.schedules[display_name]
+        return None
+    
+    def get_setpoint_full_data(self, display_name):
+        """Get full setpoint data including seasonal_rules if present."""
+        if display_name in self.setpoints:
+            return self.setpoints[display_name]
+        return None
+    
+    def is_seasonal(self, display_name):
+        """Check if a schedule is seasonal (has #-override companions)."""
+        data = self.schedules.get(display_name) or self.setpoints.get(display_name)
+        return data.get('is_seasonal', False) if data else False
+    
     def get_setpoint_values(self, display_name):
         """Get 24-hour values for a setpoint schedule by display name"""
         if display_name in self.setpoints:
             return self.setpoints[display_name]['values']
         return None
 
-
-# ======================= HB LIBRARY LOADERS ==================================
+# --- HB LIBRARY LOADERS ---
 def load_hb_library_programs():
     """Load ProgramType identifiers from HB library"""
     programs = []
@@ -318,7 +987,6 @@ def load_hb_library_programs():
     except Exception as e:
         pass
     return programs
-
 
 def load_hb_library_schedules():
     """Load Schedule identifiers from HB library"""
@@ -330,7 +998,6 @@ def load_hb_library_schedules():
         pass
     return schedules
 
-
 def get_hb_program_by_id(program_id):
     """Get a ProgramType object from HB library by identifier"""
     try:
@@ -338,7 +1005,6 @@ def get_hb_program_by_id(program_id):
         return program_type_by_identifier(program_id)
     except Exception as e:
         return None
-
 
 def get_hb_schedule_by_id(schedule_id):
     """Get a ScheduleRuleset object from HB library by identifier"""
@@ -348,8 +1014,7 @@ def get_hb_schedule_by_id(schedule_id):
     except Exception as e:
         return None
 
-
-# ======================= PROGRAM DATA CLASS ==================================
+# --- PROGRAM DATA CLASS ---
 class GDSProgramData:
     """Holds all program type data for a space - outputs FULL format for HB String to Object"""
     
@@ -391,6 +1056,8 @@ class GDSProgramData:
         
         if schedule_name.startswith("[GDS] "):
             name = schedule_name[6:]
+            if name.endswith(" [S]"):
+                name = name[:-4]
             if gds_parser:
                 if is_setpoint:
                     return gds_parser.get_setpoint_values(name)
@@ -415,18 +1082,20 @@ class GDSProgramData:
         else:
             return SCHEDULE_PRESETS.get(schedule_name, [0]*24)
     
-    def _make_schedule_full(self, name, weekday_vals, weekend_vals=None, type_limit="Fractional"):
-        """Create ScheduleRuleset dict for JSON serialization"""
-        if weekend_vals is None:
-            weekend_vals = weekday_vals
+    def _make_schedule_full(self, name, weekday_vals, weekend_vals=None,
+                            type_limit="Fractional", seasonal_rules=None):
+        """Create ScheduleRuleset dict for JSON serialization.
         
-        # Ensure values are flat lists of floats
-        weekday_vals = [float(v) for v in weekday_vals]
-        weekend_vals = [float(v) for v in weekend_vals]
-        
-        # Times list for 24-hour schedule: [[0,0], [1,0], [2,0], ..., [23,0]]
-        times_24 = [[i, 0] for i in range(24)]
-        
+        Args:
+            name: Schedule identifier string.
+            weekday_vals: 24 hourly values for weekday.
+            weekend_vals: 24 hourly values for weekend/default.
+            type_limit: "Fractional", "Temperature", or "ActivityLevel".
+            seasonal_rules: Optional list of seasonal override dicts from parser.
+                Each dict: label, weekday_values, weekend_values, start_date, end_date.
+                If provided, base weekday/weekend become the default and each
+                override becomes a date-bounded ScheduleRule pair (WD + WE).
+        """
         # Type limit definitions
         type_limits = {
             "Fractional": {"type": "ScheduleTypeLimit", "identifier": "Fractional", 
@@ -437,46 +1106,146 @@ class GDSProgramData:
                              "lower_limit": 0, "upper_limit": 1000, "numeric_type": "Continuous", "unit_type": "ActivityLevel"},
         }
         
-        # Create day schedule identifiers
-        default_day_id = "{}_Default".format(name)
-        weekday_day_id = "{}_Weekday".format(name)
+        if weekend_vals is None:
+            weekend_vals = weekday_vals
+        weekday_vals = [float(v) for v in weekday_vals]
+        weekend_vals = [float(v) for v in weekend_vals]
+        times_24 = [[i, 0] for i in range(24)]
         
-        # Build the ScheduleRuleset dict
+        # --- Non-seasonal path (backward compatible) ---
+        if not seasonal_rules:
+            default_day_id = "{}_Default".format(name)
+            weekday_day_id = "{}_Weekday".format(name)
+            return {
+                "type": "ScheduleRuleset",
+                "identifier": name,
+                "schedule_type_limit": type_limits.get(type_limit, type_limits["Fractional"]),
+                "day_schedules": [
+                    {"type": "ScheduleDay", "identifier": default_day_id,
+                     "values": weekend_vals, "times": times_24},
+                    {"type": "ScheduleDay", "identifier": weekday_day_id,
+                     "values": weekday_vals, "times": times_24}
+                ],
+                "default_day_schedule": default_day_id,
+                "schedule_rules": [{
+                    "type": "ScheduleRuleAbridged",
+                    "schedule_day": weekday_day_id,
+                    "apply_sunday": False, "apply_monday": True,
+                    "apply_tuesday": True, "apply_wednesday": True,
+                    "apply_thursday": True, "apply_friday": True,
+                    "apply_saturday": False,
+                    "start_date": [1, 1], "end_date": [12, 31]
+                }]
+            }
+        
+        # --- Seasonal path: multiple date-bounded rules ---
+        day_schedules = []
+        schedule_rules = []
+        seen_day_ids = set()
+        
+        # Base weekend values serve as the default (fallback for uncovered dates)
+        default_day_id = "{}_Default".format(name)
+        day_schedules.append({
+            "type": "ScheduleDay", "identifier": default_day_id,
+            "values": weekend_vals, "times": times_24
+        })
+        
+        # Base weekday also needs a rule for dates NOT covered by overrides.
+        # The default_day_schedule handles weekends/uncovered; we add a
+        # year-spanning base weekday rule at lowest priority (appended last).
+        base_wd_id = "{}_Base_WD".format(name)
+        day_schedules.append({
+            "type": "ScheduleDay", "identifier": base_wd_id,
+            "values": weekday_vals, "times": times_24
+        })
+        
+        # Override rules (higher priority — added first so HB evaluates them first)
+        for rule in seasonal_rules:
+            label = str(rule['label'])
+            wd_vals = [float(v) for v in rule['weekday_values']]
+            we_vals = [float(v) for v in rule['weekend_values']]
+            
+            wd_day_id = "{}_{}_WD".format(name, label)
+            if wd_day_id not in seen_day_ids:
+                day_schedules.append({
+                    "type": "ScheduleDay", "identifier": wd_day_id,
+                    "values": wd_vals, "times": times_24
+                })
+                seen_day_ids.add(wd_day_id)
+            
+            we_day_id = "{}_{}_WE".format(name, label)
+            if we_day_id not in seen_day_ids:
+                day_schedules.append({
+                    "type": "ScheduleDay", "identifier": we_day_id,
+                    "values": we_vals, "times": times_24
+                })
+                seen_day_ids.add(we_day_id)
+            
+            # Auto-split cross-year-boundary ranges (e.g. [12,1]→[1,31])
+            # HB does start_doy <= doy <= end_doy — fails when start > end
+            start = rule['start_date']
+            end = rule['end_date']
+            if start[0] > end[0]:
+                date_ranges = [(start, [12, 31]), ([1, 1], end)]
+            else:
+                date_ranges = [(start, end)]
+            
+            for dr_start, dr_end in date_ranges:
+                schedule_rules.append({
+                    "type": "ScheduleRuleAbridged",
+                    "schedule_day": wd_day_id,
+                    "apply_sunday": False, "apply_monday": True,
+                    "apply_tuesday": True, "apply_wednesday": True,
+                    "apply_thursday": True, "apply_friday": True,
+                    "apply_saturday": False,
+                    "start_date": dr_start, "end_date": dr_end
+                })
+                schedule_rules.append({
+                    "type": "ScheduleRuleAbridged",
+                    "schedule_day": we_day_id,
+                    "apply_sunday": True, "apply_monday": False,
+                    "apply_tuesday": False, "apply_wednesday": False,
+                    "apply_thursday": False, "apply_friday": False,
+                    "apply_saturday": True,
+                    "start_date": dr_start, "end_date": dr_end
+                })
+        
+        # Base weekday rule — covers any dates not claimed by overrides
+        schedule_rules.append({
+            "type": "ScheduleRuleAbridged",
+            "schedule_day": base_wd_id,
+            "apply_sunday": False, "apply_monday": True,
+            "apply_tuesday": True, "apply_wednesday": True,
+            "apply_thursday": True, "apply_friday": True,
+            "apply_saturday": False,
+            "start_date": [1, 1], "end_date": [12, 31]
+        })
+        
         return {
             "type": "ScheduleRuleset",
             "identifier": name,
             "schedule_type_limit": type_limits.get(type_limit, type_limits["Fractional"]),
-            "day_schedules": [
-                {
-                    "type": "ScheduleDay",
-                    "identifier": default_day_id,
-                    "values": weekend_vals,
-                    "times": times_24
-                },
-                {
-                    "type": "ScheduleDay",
-                    "identifier": weekday_day_id,
-                    "values": weekday_vals,
-                    "times": times_24
-                }
-            ],
+            "day_schedules": day_schedules,
             "default_day_schedule": default_day_id,
-            "schedule_rules": [
-                {
-                    "type": "ScheduleRuleAbridged",
-                    "schedule_day": weekday_day_id,
-                    "apply_sunday": False,
-                    "apply_monday": True,
-                    "apply_tuesday": True,
-                    "apply_wednesday": True,
-                    "apply_thursday": True,
-                    "apply_friday": True,
-                    "apply_saturday": False,
-                    "start_date": [1, 1],
-                    "end_date": [12, 31]
-                }
-            ]
+            "schedule_rules": schedule_rules
         }
+    
+    def _get_seasonal_rules(self, schedule_name, gds_parser, is_setpoint=False):
+        """Get seasonal_rules for a GDS schedule if it has # companions.
+        Returns list of rule dicts, or None for non-seasonal schedules.
+        """
+        if not gds_parser or not schedule_name.startswith("[GDS] "):
+            return None
+        name = schedule_name[6:]
+        if name.endswith(" [S]"):
+            name = name[:-4]
+        if is_setpoint:
+            data = gds_parser.get_setpoint_full_data(name)
+        else:
+            data = gds_parser.get_schedule_full_data(name)
+        if data and data.get('is_seasonal'):
+            return data.get('seasonal_rules')
+        return None
     
     def to_program_dict(self, gds_parser=None):
         """Generate FULL ProgramType JSON - works directly with HB Load Objects"""
@@ -488,7 +1257,8 @@ class GDSProgramData:
         occ_we = self.get_schedule_values(self.occupancy_weekend, gds_parser=gds_parser)
         if occ_we is None:
             occ_we = SCHEDULE_PRESETS.get("Office Weekend", occ_wd)
-        occ_sched = self._make_schedule_full("{}_Occupancy".format(base_id), occ_wd, occ_we, "Fractional")
+        occ_seasonal = self._get_seasonal_rules(self.occupancy_schedule, gds_parser)
+        occ_sched = self._make_schedule_full("{}_Occupancy".format(base_id), occ_wd, occ_we, "Fractional", occ_seasonal)
         
         act_vals = self.get_schedule_values(self.activity_schedule, gds_parser=gds_parser)
         if act_vals is None:
@@ -498,29 +1268,34 @@ class GDSProgramData:
         light_vals = self.get_schedule_values(self.lighting_schedule, gds_parser=gds_parser)
         if light_vals is None:
             light_vals = SCHEDULE_PRESETS.get("Office Weekday", [0]*24)
-        light_sched = self._make_schedule_full("{}_Lighting".format(base_id), light_vals, [v*0.1 for v in light_vals], "Fractional")
+        light_seasonal = self._get_seasonal_rules(self.lighting_schedule, gds_parser)
+        light_sched = self._make_schedule_full("{}_Lighting".format(base_id), light_vals, [v*0.1 for v in light_vals], "Fractional", light_seasonal)
         
         equip_vals = self.get_schedule_values(self.equipment_schedule, gds_parser=gds_parser)
         if equip_vals is None:
             equip_vals = SCHEDULE_PRESETS.get("Office Weekday", [0]*24)
-        equip_sched = self._make_schedule_full("{}_Equipment".format(base_id), equip_vals, [v*0.3 for v in equip_vals], "Fractional")
+        equip_seasonal = self._get_seasonal_rules(self.equipment_schedule, gds_parser)
+        equip_sched = self._make_schedule_full("{}_Equipment".format(base_id), equip_vals, [v*0.3 for v in equip_vals], "Fractional", equip_seasonal)
         
         infil_vals = self.get_schedule_values(self.infiltration_schedule, gds_parser=gds_parser)
         if infil_vals is None:
             infil_vals = [1.0]*24
-        infil_sched = self._make_schedule_full("{}_Infiltration".format(base_id), infil_vals, infil_vals, "Fractional")
+        infil_seasonal = self._get_seasonal_rules(self.infiltration_schedule, gds_parser)
+        infil_sched = self._make_schedule_full("{}_Infiltration".format(base_id), infil_vals, infil_vals, "Fractional", infil_seasonal)
         
         vent_sched = self._make_schedule_full("{}_Ventilation".format(base_id), occ_wd, [0]*24, "Fractional")
         
         heat_vals = self.get_schedule_values(self.heating_setpoint, is_setpoint=True, gds_parser=gds_parser)
         if heat_vals is None:
             heat_vals = SETPOINT_PRESETS.get("Office Heating", [21]*24)
-        heat_sched = self._make_schedule_full("{}_Heating".format(base_id), heat_vals, [v-2 for v in heat_vals], "Temperature")
+        heat_seasonal = self._get_seasonal_rules(self.heating_setpoint, gds_parser, is_setpoint=True)
+        heat_sched = self._make_schedule_full("{}_Heating".format(base_id), heat_vals, [v-2 for v in heat_vals], "Temperature", heat_seasonal)
         
         cool_vals = self.get_schedule_values(self.cooling_setpoint, is_setpoint=True, gds_parser=gds_parser)
         if cool_vals is None:
             cool_vals = SETPOINT_PRESETS.get("Office Cooling", [24]*24)
-        cool_sched = self._make_schedule_full("{}_Cooling".format(base_id), cool_vals, [v+2 for v in cool_vals], "Temperature")
+        cool_seasonal = self._get_seasonal_rules(self.cooling_setpoint, gds_parser, is_setpoint=True)
+        cool_sched = self._make_schedule_full("{}_Cooling".format(base_id), cool_vals, [v+2 for v in cool_vals], "Temperature", cool_seasonal)
         
         program = {
             "type": "ProgramType",
@@ -570,8 +1345,8 @@ class GDSProgramData:
             "ventilation": {
                 "type": "Ventilation",
                 "identifier": "{}_Ventilation".format(base_id),
-                "outdoor_air_per_person": self.ventilation_per_person,
-                "outdoor_air_per_area": self.ventilation_per_area,
+                "flow_per_person": self.ventilation_per_person,
+                "flow_per_area": self.ventilation_per_area,
                 "air_changes_per_hour": 0.0,
                 "schedule": vent_sched
             },
@@ -600,7 +1375,8 @@ class GDSProgramData:
             shw_vals = self.get_schedule_values(self.shw_schedule, gds_parser=gds_parser)
             if shw_vals is None:
                 shw_vals = SCHEDULE_PRESETS.get("Residential", [0.5]*24)
-            shw_sched = self._make_schedule_full("{}_SHW".format(base_id), shw_vals, shw_vals, "Fractional")
+            shw_sched = self._make_schedule_full("{}_SHW".format(base_id), shw_vals, shw_vals, "Fractional",
+                                                   self._get_seasonal_rules(self.shw_schedule, gds_parser))
             
             program["service_hot_water"] = {
                 "type": "ServiceHotWater",
@@ -613,7 +1389,6 @@ class GDSProgramData:
             }
         
         return program
-
 
 # --------------------------- helpers -----------------------------------------
 def schedule(action):
@@ -1227,7 +2002,6 @@ def get_hb_shades_from_param(nickname):
     
     return shades
 
-
 # --------------------------- UI class ----------------------------------------
 class GDSHubPanel(Forms.Form):
     def __init__(self):
@@ -1241,6 +2015,8 @@ class GDSHubPanel(Forms.Form):
         self.collected_breps = []
         self.envelope_breps = []
         self.surface_list = []
+        self._full_surface_list = []   # unfiltered backup
+        self._full_face_items = []     # [(label_str, bc_str, orient_str, brep), ...]
         self.aperture_surfaces = []
         self.door_surfaces = []
         # Cumulative lists for all applied apertures/doors (append mode)
@@ -1260,6 +2036,14 @@ class GDSHubPanel(Forms.Form):
         
         # Pending program assignments: {room_index: program_dict}
         self.pending_assignments = {}
+        
+        # Applied (sent to GH) program names: {room_index: program_name}
+        # Persists after Apply so grid still shows what was assigned
+        self.applied_programs = {}
+        
+        # Stored program definitions: {program_name: program_dict (HB JSON)}
+        # Accumulates across Assign clicks, persists in session file for re-Apply
+        self.program_definitions = {}
         
         # Error tracking
         self._last_program_error = None
@@ -1281,6 +2065,24 @@ class GDSHubPanel(Forms.Form):
         self._setup_events()
         self._load_hb_library()
         self._load_custom_schedules_silent()
+        
+        # Auto-load GDS database from GH panel so dropdowns have [GDS] items
+        # before we try to restore saved state
+        self._auto_load_gds_database()
+        
+        # Re-populate dropdowns now that GDS database may be loaded
+        self._populate_schedule_dropdowns()
+        
+        # NOW restore saved state (dropdowns have all items including [GDS])
+        self._restore_service_state()
+        
+        # Show hint if stored session is available for re-Apply
+        if self.program_definitions and self.applied_programs:
+            n_defs = len(self.program_definitions)
+            n_rooms = len(self.applied_programs)
+            self.lbl_init_status.Text = "Session available: {} program(s), {} room(s) — click Restore Session".format(
+                n_defs, n_rooms)
+            self.lbl_init_status.TextColor = Drawing.Color.FromArgb(0, 120, 60)
     
     def _load_hb_library(self):
         """Load HB library schedules and programs"""
@@ -1297,6 +2099,20 @@ class GDSHubPanel(Forms.Form):
                 for name, data in all_schedules.items():
                     self.program_data.custom_schedules[name] = data.get("values", [0]*24)
         except:
+            pass
+    
+    def _auto_load_gds_database(self):
+        """Auto-load GDS database from GH panel on startup (silent).
+        This ensures [GDS] items are in dropdowns before _restore_service_state()."""
+        try:
+            self._load_gds_database()
+            if self.gds_parser:
+                sched_count = len(self.gds_parser.schedules) if self.gds_parser.schedules else 0
+                setp_count = len(self.gds_parser.setpoints) if self.gds_parser.setpoints else 0
+                if hasattr(self, 'lbl_gds_status'):
+                    self.lbl_gds_status.Text = "GDS auto-loaded: {} sched, {} setp".format(
+                        sched_count, setp_count)
+        except Exception:
             pass
     
     def _load_gds_database(self, path=None):
@@ -1336,7 +2152,7 @@ class GDSHubPanel(Forms.Form):
         self._create_renewables_module()
         self.tab_control.Pages.Add(self.tab_renewables)
         
-        # Quick Evaluation is now a separate panel, not a tab (v62)
+        # Quick Evaluation is now a separate panel, not a tab
         self._create_quick_eval_panel()
         
         # Main content container - holds either tab_control or quick_eval_panel
@@ -1384,7 +2200,7 @@ class GDSHubPanel(Forms.Form):
         columns.DefaultSpacing = Drawing.Size(8, 0)
         columns.BeginHorizontal()
         
-        # ========== COLUMN 1: Geometry Definition + Input Panels (stacked) ==========
+        # --- COLUMN 1: Geometry Definition + Input Panels (stacked) ---
         col1_layout = Forms.DynamicLayout()
         col1_layout.DefaultSpacing = Drawing.Size(0, 8)
         
@@ -1471,7 +2287,7 @@ class GDSHubPanel(Forms.Form):
         
         col1_layout.Add(self._space_col1_split, xscale=True, yscale=True)
         
-        # ========== COLUMN 2: Space Conditioning (v62) ==========
+        # --- COLUMN 2: Space Conditioning ---
         col2_layout = Forms.DynamicLayout()
         col2_layout.DefaultSpacing = Drawing.Size(0, 8)
         
@@ -1481,17 +2297,20 @@ class GDSHubPanel(Forms.Form):
         cond_layout.Padding = Drawing.Padding(8)
         
         # Status label
-        self.lbl_cond_status = Forms.Label(Text="Load geometry from 'Blds' component to set conditioning status")
+        self.lbl_cond_status = Forms.Label(Text="Set each space as conditioned (heated/cooled) or unconditioned")
         cond_layout.AddRow(self.lbl_cond_status)
-        
-        # Load button
-        self.btn_load_blds_cond = Forms.Button(Text="Load Blds Geometry")
-        cond_layout.AddRow(self.btn_load_blds_cond)
         
         cond_layout.AddSpace()
         
-        # Grid for spaces with conditioning checkboxes
-        cond_layout.AddRow(Forms.Label(Text="Spaces (check = conditioned, uncheck = unconditioned):"))
+        # Grid label + Load button in one row
+        cond_label_row = Forms.DynamicLayout()
+        cond_label_row.BeginHorizontal()
+        cond_label_row.Add(Forms.Label(Text="Spaces (check = conditioned, uncheck = unconditioned):"), xscale=True)
+        self.btn_load_space_geo = Forms.Button(Text="Load Space Geometry")
+        self.btn_load_space_geo.Width = 150
+        cond_label_row.Add(self.btn_load_space_geo, xscale=False)
+        cond_label_row.EndHorizontal()
+        cond_layout.AddRow(cond_label_row)
         
         self.grid_cond = Forms.GridView()
         self.grid_cond.Height = 280
@@ -1568,16 +2387,6 @@ class GDSHubPanel(Forms.Form):
         
         layout.Add(columns, xscale=True, yscale=True)
         
-        # Bottom button bar (centered)
-        btn_bar_space = Forms.DynamicLayout()
-        btn_bar_space.BeginHorizontal()
-        btn_bar_space.Add(None)
-        self.btn_resync = Forms.Button(Text="Re-sync Outputs")
-        btn_bar_space.Add(self.btn_resync)
-        btn_bar_space.Add(None)
-        btn_bar_space.EndHorizontal()
-        layout.Add(btn_bar_space)
-        
         self.tab_space.Content = layout
     
     def _create_envelope_module(self):
@@ -1589,26 +2398,45 @@ class GDSHubPanel(Forms.Form):
         columns.DefaultSpacing = Drawing.Size(8, 0)
         columns.BeginHorizontal()
         
-        # ===== LEFT: Surface Selection =====
+        # --- LEFT: Surface Selection ---
         grp_surf = Forms.GroupBox(Text="Surface Selection")
         surf_layout = Forms.DynamicLayout()
         surf_layout.DefaultSpacing = Drawing.Size(5, 6)
         surf_layout.Padding = Drawing.Padding(8)
         
-        self.lbl_envelope_status = Forms.Label(Text="Select breps for envelope")
+        self.lbl_envelope_status = Forms.Label(Text="Use rooms from Space Module or re-define geometry")
         surf_layout.AddRow(self.lbl_envelope_status)
         
-        self.btn_select_envelope = Forms.Button(Text="Select Breps from Rhino")
-        surf_layout.AddRow(self.btn_select_envelope)
-        
-        self.btn_use_space_breps = Forms.Button(Text="Use Space Module Breps")
+        self.btn_use_space_breps = Forms.Button(Text="Use Upstream Rooms")
         surf_layout.AddRow(self.btn_use_space_breps)
+        
+        self.btn_select_envelope = Forms.Button(Text="Re-define Geometry")
+        surf_layout.AddRow(self.btn_select_envelope)
         
         surf_layout.AddSpace()
         
         self.btn_deconstruct = Forms.Button(Text="Deconstruct to Faces")
         self.btn_deconstruct.Enabled = False
         surf_layout.AddRow(self.btn_deconstruct)
+        
+        filter_row = Forms.DynamicLayout()
+        filter_row.BeginHorizontal()
+        filter_row.Add(Forms.Label(Text="Filter:"))
+        self.dd_face_orient = Forms.DropDown()
+        self.dd_face_orient.Items.Add("All")
+        self.dd_face_orient.Items.Add("Wall")
+        self.dd_face_orient.Items.Add("Roof")
+        self.dd_face_orient.Items.Add("Floor")
+        self.dd_face_orient.SelectedIndex = 0
+        filter_row.Add(self.dd_face_orient)
+        self.dd_face_bc = Forms.DropDown()
+        self.dd_face_bc.Items.Add("All")
+        self.dd_face_bc.Items.Add("Ext")
+        self.dd_face_bc.Items.Add("Int")
+        self.dd_face_bc.SelectedIndex = 0
+        filter_row.Add(self.dd_face_bc)
+        filter_row.EndHorizontal()
+        surf_layout.AddRow(filter_row)
         
         surf_layout.AddRow(Forms.Label(Text="Faces (Ctrl+Click multi):"))
         self.grid_faces = Forms.GridView()
@@ -1618,7 +2446,7 @@ class GDSHubPanel(Forms.Form):
         col = Forms.GridColumn()
         col.HeaderText = "Face Info"
         col.DataCell = Forms.TextBoxCell(0)
-        col.Width = 110
+        col.Width = 200
         self.grid_faces.Columns.Add(col)
         
         col_type = Forms.GridColumn()
@@ -1637,7 +2465,7 @@ class GDSHubPanel(Forms.Form):
         grp_surf.Content = surf_layout
         self._env_col_left = grp_surf
         
-        # ===== MIDDLE: Aperture Definition =====
+        # --- MIDDLE: Aperture Definition ---
         middle_layout = Forms.DynamicLayout()
         middle_layout.DefaultSpacing = Drawing.Size(5, 6)
         self._env_col_mid = middle_layout
@@ -1695,21 +2523,25 @@ class GDSHubPanel(Forms.Form):
         
         ap_layout.AddSpace()
         self.btn_gen_aperture = Forms.Button(Text="Generate Aperture(s)")
-        ap_layout.AddRow(self.btn_gen_aperture)
-        
         self.btn_bake_aperture = Forms.Button(Text="Bake to Layer")
-        ap_layout.AddRow(self.btn_bake_aperture)
-        
         self.btn_send_to_gh = Forms.Button(Text="Apply to GH (Append)")
-        ap_layout.AddRow(self.btn_send_to_gh)
+        gen_bake_apply_ap_row = Forms.DynamicLayout()
+        gen_bake_apply_ap_row.BeginHorizontal()
+        gen_bake_apply_ap_row.Add(self.btn_gen_aperture, xscale=True)
+        gen_bake_apply_ap_row.Add(self.btn_bake_aperture, xscale=True)
+        gen_bake_apply_ap_row.Add(self.btn_send_to_gh, xscale=True)
+        gen_bake_apply_ap_row.EndHorizontal()
+        ap_layout.Add(gen_bake_apply_ap_row)
         
-        # Clear buttons row (50-50 split)
+        # Clear + Re-sync buttons row (3-column split)
         clear_ap_row = Forms.DynamicLayout()
         clear_ap_row.BeginHorizontal()
         self.btn_clear_applied_ap = Forms.Button(Text="Clear GH")
         self.btn_clear_baked_ap = Forms.Button(Text="Clear Geometry")
+        self.btn_resync_ap = Forms.Button(Text="Re-sync")
         clear_ap_row.Add(self.btn_clear_applied_ap, xscale=True)
         clear_ap_row.Add(self.btn_clear_baked_ap, xscale=True)
+        clear_ap_row.Add(self.btn_resync_ap, xscale=True)
         clear_ap_row.EndHorizontal()
         ap_layout.Add(clear_ap_row)
         
@@ -1740,7 +2572,7 @@ class GDSHubPanel(Forms.Form):
         middle_layout.Add(grp_ap, xscale=True, yscale=False)
         middle_layout.Add(grp_preview, xscale=True, yscale=True)
         
-        # ===== RIGHT: Door Definition =====
+        # --- RIGHT: Door Definition ---
         right_layout = Forms.DynamicLayout()
         right_layout.DefaultSpacing = Drawing.Size(5, 6)
         self._env_col_right = right_layout
@@ -1812,21 +2644,25 @@ class GDSHubPanel(Forms.Form):
         
         door_layout.AddSpace()
         self.btn_gen_door = Forms.Button(Text="Generate Door(s)")
-        door_layout.AddRow(self.btn_gen_door)
-        
         self.btn_bake_door = Forms.Button(Text="Bake to Layer")
-        door_layout.AddRow(self.btn_bake_door)
-        
         self.btn_send_door_to_gh = Forms.Button(Text="Apply to GH (Append)")
-        door_layout.AddRow(self.btn_send_door_to_gh)
+        gen_bake_apply_door_row = Forms.DynamicLayout()
+        gen_bake_apply_door_row.BeginHorizontal()
+        gen_bake_apply_door_row.Add(self.btn_gen_door, xscale=True)
+        gen_bake_apply_door_row.Add(self.btn_bake_door, xscale=True)
+        gen_bake_apply_door_row.Add(self.btn_send_door_to_gh, xscale=True)
+        gen_bake_apply_door_row.EndHorizontal()
+        door_layout.Add(gen_bake_apply_door_row)
         
-        # Clear buttons row (50-50 split)
+        # Clear + Re-sync buttons row (3-column split)
         clear_door_row = Forms.DynamicLayout()
         clear_door_row.BeginHorizontal()
         self.btn_clear_applied_door = Forms.Button(Text="Clear GH")
         self.btn_clear_baked_door = Forms.Button(Text="Clear Geometry")
+        self.btn_resync_door = Forms.Button(Text="Re-sync")
         clear_door_row.Add(self.btn_clear_applied_door, xscale=True)
         clear_door_row.Add(self.btn_clear_baked_door, xscale=True)
+        clear_door_row.Add(self.btn_resync_door, xscale=True)
         clear_door_row.EndHorizontal()
         door_layout.Add(clear_door_row)
         
@@ -1875,38 +2711,31 @@ class GDSHubPanel(Forms.Form):
         columns.DefaultSpacing = Drawing.Size(8, 0)
         columns.BeginHorizontal()
         
-        # ===== LEFT: Room Selection =====
+        # --- LEFT: Room Selection (Scrollable) ---
         grp_rooms = Forms.GroupBox(Text="Room Selection")
         self._sched_col_left = grp_rooms  # Store reference for dynamic sizing
+        left_scrollable = Forms.Scrollable()
+        left_scrollable.ExpandContentWidth = True
+        left_scrollable.ExpandContentHeight = False
         rooms_layout = Forms.DynamicLayout()
         rooms_layout.DefaultSpacing = Drawing.Size(5, 5)
         rooms_layout.Padding = Drawing.Padding(8)
         
-        self.lbl_rooms_status = Forms.Label(Text="Load HB Rooms from GH")
+        self.lbl_rooms_status = Forms.Label(Text="Use Upstream Rooms")
         rooms_layout.AddRow(self.lbl_rooms_status)
         
-        self.btn_load_rooms = Forms.Button(Text="Load Rooms from GH")
+        self.btn_load_rooms = Forms.Button(Text="Use Upstream Rooms")
         rooms_layout.AddRow(self.btn_load_rooms)
         
-        rooms_layout.AddSpace()
-        
-        # GDS Database reload
-        db_row = Forms.DynamicLayout()
-        db_row.BeginHorizontal()
         self.btn_reload_gds = Forms.Button(Text="Reload GDS Database")
-        self.btn_reload_gds.Width = 130
-        db_row.Add(self.btn_reload_gds)
-        db_row.EndHorizontal()
-        rooms_layout.Add(db_row)
+        rooms_layout.AddRow(self.btn_reload_gds)
         
         self.lbl_gds_status = Forms.Label(Text="GDS: Not loaded")
         rooms_layout.AddRow(self.lbl_gds_status)
         
-        rooms_layout.AddSpace()
-        
         rooms_layout.AddRow(Forms.Label(Text="Rooms (Ctrl+Click for multiple):"))
         self.grid_rooms = Forms.GridView()
-        self.grid_rooms.Height = 180
+        self.grid_rooms.Height = 250
         self.grid_rooms.AllowMultipleSelection = True
         
         col_name = Forms.GridColumn()
@@ -1922,9 +2751,9 @@ class GDSHubPanel(Forms.Form):
         self.grid_rooms.Columns.Add(col_area)
         
         col_prog = Forms.GridColumn()
-        col_prog.HeaderText = "Current Program"
+        col_prog.HeaderText = "Preset Program"
         col_prog.DataCell = Forms.TextBoxCell(2)
-        col_prog.Width = 100
+        col_prog.Width = 120
         self.grid_rooms.Columns.Add(col_prog)
         
         rooms_layout.Add(self.grid_rooms, yscale=True)
@@ -1939,16 +2768,107 @@ class GDSHubPanel(Forms.Form):
         rooms_layout.AddRow(Forms.Label(Text="Selected Room Info:"))
         self.txt_room_exam = Forms.TextArea()
         self.txt_room_exam.ReadOnly = True
-        self.txt_room_exam.Height = 120
+        self.txt_room_exam.Height = 80
         try:
             self.txt_room_exam.Font = Drawing.Font("Consolas", 8)
         except:
             pass
         rooms_layout.Add(self.txt_room_exam, xscale=True)
         
-        grp_rooms.Content = rooms_layout
+        # ─── Thermal Comfort Simulation ───
+        grp_comfort = Forms.GroupBox(Text="Thermal Comfort Simulation")
+        comfort_layout = Forms.DynamicLayout()
+        comfort_layout.DefaultSpacing = Drawing.Size(3, 3)
+        comfort_layout.Padding = Drawing.Padding(6)
         
-        # ===== MIDDLE: Program Definition (Scrollable) =====
+        self.chk_comfort_enable = Forms.CheckBox(Text="Enable Fanger Comfort Model")
+        self.chk_comfort_enable.Checked = False
+        comfort_layout.AddRow(self.chk_comfort_enable)
+        
+        self.pnl_comfort_params = Forms.Panel()
+        comfort_params_layout = Forms.DynamicLayout()
+        comfort_params_layout.DefaultSpacing = Drawing.Size(3, 3)
+        
+        model_row = Forms.DynamicLayout()
+        model_row.BeginHorizontal()
+        lbl_model = Forms.Label(Text="Model:")
+        lbl_model.Width = 75
+        model_row.Add(lbl_model)
+        self.dd_comfort_model = Forms.DropDown()
+        for m in ["Fanger", "Pierce", "KSU", "AdaptiveASH55", "AdaptiveCEN15251"]:
+            self.dd_comfort_model.Items.Add(m)
+        self.dd_comfort_model.SelectedIndex = 0
+        self.dd_comfort_model.Width = 110
+        self.dd_comfort_model.Height = 21
+        model_row.Add(self.dd_comfort_model)
+        model_row.EndHorizontal()
+        comfort_params_layout.Add(model_row)
+        
+        def add_comfort_row(label, attr, unit, decimals, default, min_val=0, max_val=10):
+            row = Forms.DynamicLayout()
+            row.BeginHorizontal()
+            lbl = Forms.Label(Text=label)
+            lbl.Width = 75
+            row.Add(lbl)
+            num = Forms.NumericUpDown()
+            num.MinValue = min_val
+            num.MaxValue = max_val
+            num.DecimalPlaces = decimals
+            num.Value = default
+            num.Width = 65
+            setattr(self, "num_comfort_" + attr, num)
+            row.Add(num)
+            row.Add(Forms.Label(Text=unit))
+            row.EndHorizontal()
+            comfort_params_layout.Add(row)
+        
+        add_comfort_row("Clothing:", "clothing", "clo", 2, 0.7, 0, 2)
+        add_comfort_row("Air Velocity:", "air_vel", "m/s", 2, 0.1, 0, 2)
+        add_comfort_row("Work Eff:", "work_eff", "", 2, 0.0, 0, 1)
+        add_comfort_row("Ankle Vel:", "ankle_vel", "m/s", 2, 0.0, 0, 2)
+        
+        self.chk_ashrae_warnings = Forms.CheckBox(Text="ASHRAE 55 Warnings")
+        self.chk_ashrae_warnings.Checked = False
+        comfort_params_layout.AddRow(self.chk_ashrae_warnings)
+        
+        preset_comfort_row = Forms.DynamicLayout()
+        preset_comfort_row.BeginHorizontal()
+        self.btn_comfort_office = Forms.Button(Text="Office")
+        self.btn_comfort_office.Width = 50
+        preset_comfort_row.Add(self.btn_comfort_office)
+        self.btn_comfort_residential = Forms.Button(Text="Resid")
+        self.btn_comfort_residential.Width = 50
+        preset_comfort_row.Add(self.btn_comfort_residential)
+        self.btn_comfort_summer = Forms.Button(Text="Summer")
+        self.btn_comfort_summer.Width = 50
+        preset_comfort_row.Add(self.btn_comfort_summer)
+        preset_comfort_row.Add(None)
+        preset_comfort_row.EndHorizontal()
+        comfort_params_layout.Add(preset_comfort_row)
+        
+        self.pnl_comfort_params.Content = comfort_params_layout
+        self.pnl_comfort_params.Visible = False
+        comfort_layout.Add(self.pnl_comfort_params)
+        
+        send_comfort_row = Forms.DynamicLayout()
+        send_comfort_row.BeginHorizontal()
+        self.btn_send_comfort = Forms.Button(Text="Send to GH")
+        self.btn_send_comfort.Enabled = False
+        send_comfort_row.Add(self.btn_send_comfort)
+        send_comfort_row.Add(None)
+        send_comfort_row.EndHorizontal()
+        comfort_layout.Add(send_comfort_row)
+        
+        self.lbl_comfort_status = Forms.Label(Text="")
+        comfort_layout.AddRow(self.lbl_comfort_status)
+        
+        grp_comfort.Content = comfort_layout
+        rooms_layout.Add(grp_comfort, xscale=True)
+        
+        left_scrollable.Content = rooms_layout
+        grp_rooms.Content = left_scrollable
+        
+        # --- MIDDLE: Program Definition (Scrollable) ---
         middle_scrollable = Forms.Scrollable()
         middle_scrollable.ExpandContentWidth = True
         middle_scrollable.ExpandContentHeight = False
@@ -2046,7 +2966,7 @@ class GDSHubPanel(Forms.Form):
             row.EndHorizontal()
             loads_layout.Add(row)
         
-        add_shw_row("Flow/Area:", "flow", "L/h/m²", 3, 0.0, 1.0)
+        add_shw_row("Flow/Area:", "flow", "L/h/m²", 3, 0.0, 50.0)
         add_shw_row("Target Temp:", "temp", "°C", 1, 49.0, 100.0)
         add_shw_row("Sensible:", "sensible", "", 2, 0.2, 1.0)
         add_shw_row("Latent:", "latent", "", 2, 0.05, 1.0)
@@ -2063,6 +2983,85 @@ class GDSHubPanel(Forms.Form):
         shw_sched_row.Add(self.dd_shw_schedule)
         shw_sched_row.EndHorizontal()
         loads_layout.Add(shw_sched_row)
+        
+        # SHW Equipment Type dropdown (determines fuel source)
+        shw_equip_row = Forms.DynamicLayout()
+        shw_equip_row.BeginHorizontal()
+        lbl_equip = Forms.Label(Text="SHW Equip:")
+        lbl_equip.Width = 75
+        shw_equip_row.Add(lbl_equip)
+        self.dd_shw_equipment = Forms.DropDown()
+        for et in SHW_EQUIPMENT_TYPES:
+            self.dd_shw_equipment.Items.Add(et)
+        self.dd_shw_equipment.SelectedIndex = 0
+        self.dd_shw_equipment.Width = 115
+        self.dd_shw_equipment.Height = 21
+        shw_equip_row.Add(self.dd_shw_equipment)
+        shw_equip_row.EndHorizontal()
+        loads_layout.Add(shw_equip_row)
+        
+        # ── SHW Tank Parameters (shown only for tank-type heaters) ──
+        self.shw_tank_panel = Forms.DynamicLayout()
+        self.shw_tank_panel.DefaultSpacing = Drawing.Size(5, 2)
+        
+        # Tank UA row
+        ua_row = Forms.DynamicLayout()
+        ua_row.BeginHorizontal()
+        lbl_ua = Forms.Label(Text="Tank UA:")
+        lbl_ua.Width = 75
+        ua_row.Add(lbl_ua)
+        self.num_shw_tank_ua = Forms.NumericStepper()
+        self.num_shw_tank_ua.DecimalPlaces = 1
+        self.num_shw_tank_ua.MinValue = 0.0
+        self.num_shw_tank_ua.MaxValue = 100.0
+        self.num_shw_tank_ua.Value = 6.0
+        self.num_shw_tank_ua.Width = 70
+        self.num_shw_tank_ua.Height = 21
+        self.num_shw_tank_ua.Increment = 0.5
+        ua_row.Add(self.num_shw_tank_ua)
+        ua_row.Add(Forms.Label(Text="W/K"))
+        ua_row.EndHorizontal()
+        self.shw_tank_panel.Add(ua_row)
+        
+        # Ambient temperature row
+        amb_row = Forms.DynamicLayout()
+        amb_row.BeginHorizontal()
+        lbl_amb = Forms.Label(Text="Ambient:")
+        lbl_amb.Width = 75
+        amb_row.Add(lbl_amb)
+        self.num_shw_ambient = Forms.NumericStepper()
+        self.num_shw_ambient.DecimalPlaces = 1
+        self.num_shw_ambient.MinValue = 0.0
+        self.num_shw_ambient.MaxValue = 50.0
+        self.num_shw_ambient.Value = 22.0
+        self.num_shw_ambient.Width = 70
+        self.num_shw_ambient.Height = 21
+        self.num_shw_ambient.Increment = 0.5
+        amb_row.Add(self.num_shw_ambient)
+        amb_row.Add(Forms.Label(Text="°C"))
+        amb_row.EndHorizontal()
+        self.shw_tank_panel.Add(amb_row)
+        
+        # Efficiency row
+        eff_row = Forms.DynamicLayout()
+        eff_row.BeginHorizontal()
+        lbl_eff = Forms.Label(Text="Efficiency:")
+        lbl_eff.Width = 75
+        eff_row.Add(lbl_eff)
+        self.num_shw_efficiency = Forms.NumericStepper()
+        self.num_shw_efficiency.DecimalPlaces = 2
+        self.num_shw_efficiency.MinValue = 0.1
+        self.num_shw_efficiency.MaxValue = 5.0
+        self.num_shw_efficiency.Value = 1.0
+        self.num_shw_efficiency.Width = 70
+        self.num_shw_efficiency.Height = 21
+        self.num_shw_efficiency.Increment = 0.05
+        eff_row.Add(self.num_shw_efficiency)
+        eff_row.EndHorizontal()
+        self.shw_tank_panel.Add(eff_row)
+        
+        loads_layout.Add(self.shw_tank_panel)
+        self._update_shw_tank_visibility()
         
         grp_loads.Content = loads_layout
         middle_layout.Add(grp_loads, xscale=True)
@@ -2165,7 +3164,8 @@ class GDSHubPanel(Forms.Form):
         grp_custom.Content = custom_layout
         middle_layout.Add(grp_custom, xscale=True, yscale=True)
         
-        # ===== RIGHT: Preview & Actions =====
+        
+        # --- RIGHT: Preview & Actions ---
         right_layout = Forms.DynamicLayout()
         right_layout.DefaultSpacing = Drawing.Size(5, 6)
         
@@ -2176,36 +3176,25 @@ class GDSHubPanel(Forms.Form):
         
         self.txt_program_summary = Forms.TextArea()
         self.txt_program_summary.ReadOnly = True
-        self.txt_program_summary.Height = 220
+        self.txt_program_summary.Height = 140
         try:
             self.txt_program_summary.Font = Drawing.Font("Consolas", 8)
         except:
             pass
         summary_layout.Add(self.txt_program_summary, xscale=True, yscale=True)
-        grp_summary.Content = summary_layout
         
-        grp_json = create_shaded_groupbox("JSON Preview")
-        json_layout = Forms.DynamicLayout()
-        json_layout.Padding = Drawing.Padding(4)
-        json_layout.BackgroundColor = RESULT_BG_COLOR
-        
+        summary_layout.AddRow(Forms.Label(Text="JSON Preview"))
         self.txt_json_output = Forms.TextArea()
         self.txt_json_output.ReadOnly = True
+        self.txt_json_output.Height = 120
         try:
             self.txt_json_output.Font = Drawing.Font("Consolas", 8)
         except:
             pass
-        json_layout.Add(self.txt_json_output, xscale=True, yscale=True)
-        grp_json.Content = json_layout
+        summary_layout.Add(self.txt_json_output, xscale=True, yscale=True)
+        grp_summary.Content = summary_layout
         
-        right_split = Forms.Splitter()
-        right_split.Orientation = Forms.Orientation.Vertical
-        right_split.FixedPanel = Forms.SplitterFixedPanel(0)
-        right_split.Panel1 = grp_summary
-        right_split.Panel2 = grp_json
-        right_split.Position = 240
-        
-        right_layout.Add(right_split, xscale=True, yscale=True)
+        right_layout.Add(grp_summary, xscale=True, yscale=True)
         
         middle_scrollable.Content = middle_layout
         
@@ -2233,6 +3222,10 @@ class GDSHubPanel(Forms.Form):
         btn_bar.Add(spacer)
         btn_bar.Add(self.btn_output_programs)
         btn_bar.Add(self.btn_export_json)
+        spacer2 = Forms.Label(Text="   |   ")
+        btn_bar.Add(spacer2)
+        self.btn_restore_session = Forms.Button(Text="Restore Session")
+        btn_bar.Add(self.btn_restore_session)
         btn_bar.Add(None)
         # Initialization status label
         self.lbl_init_status = Forms.Label(Text="")
@@ -2243,8 +3236,9 @@ class GDSHubPanel(Forms.Form):
         
         self.tab_schedule.Content = layout
         
-        # Initialize dropdowns with presets
+        # Initialize dropdowns with presets only (GDS database not loaded yet)
         self._populate_schedule_dropdowns()
+        # NOTE: _restore_service_state() is called from __init__ AFTER GDS database auto-load
     
     def _populate_schedule_dropdowns(self):
         """Populate all schedule dropdowns with presets, GDS, HB library, and custom items"""
@@ -2270,10 +3264,13 @@ class GDSHubPanel(Forms.Form):
                             continue
                     dd.Items.Add("Custom:" + name)
             
-            # Add GDS items
+            # Add GDS items (append [S] tag for seasonal composites)
             if gds_source:
                 for name in sorted(gds_source.keys()):
-                    dd.Items.Add("[GDS] " + name)
+                    if gds_source[name].get('is_seasonal', False):
+                        dd.Items.Add("[GDS] " + name + " [S]")
+                    else:
+                        dd.Items.Add("[GDS] " + name)
             
             # Add HB library items
             if self.hb_library_schedules and hb_filter:
@@ -2310,7 +3307,8 @@ class GDSHubPanel(Forms.Form):
                 self.dd_shw_schedule.Items.Add(s)
             if self.gds_parser and self.gds_parser.schedules:
                 for name in sorted(self.gds_parser.schedules.keys()):
-                    self.dd_shw_schedule.Items.Add("[GDS] " + name)
+                    tag = " [S]" if self.gds_parser.schedules[name].get('is_seasonal', False) else ""
+                    self.dd_shw_schedule.Items.Add("[GDS] " + name + tag)
             if self.dd_shw_schedule.Items.Count > 0:
                 self.dd_shw_schedule.SelectedIndex = 0
         
@@ -2361,7 +3359,9 @@ class GDSHubPanel(Forms.Form):
         self.lbl_hvac_status = Forms.Label(Text="")
         layout.AddRow(self.lbl_hvac_status)
         
-        layout.AddRow(Forms.Label(Text="For room-by-room HVAC, use GDS GBE Refiner."))
+        note = Forms.Label(Text="Reference case uses Ideal Air (loads only).\nDesign case HVAC is applied automatically via GDS GBE Refiner.\nFor room-by-room override, use Refiner's HVAC tab.")
+        note.TextColor = Drawing.Color.FromArgb(120, 120, 120)
+        layout.AddRow(note)
         
         self.tab_hvac.Content = layout
     
@@ -2380,7 +3380,7 @@ class GDSHubPanel(Forms.Form):
         columns.DefaultSpacing = Drawing.Size(8, 0)
         columns.BeginHorizontal()
         
-        # ========== COLUMN 1: Site + Weather (Stacked) ==========
+        # --- COLUMN 1: Site + Weather (Stacked) ---
         col1_layout = Forms.DynamicLayout()
         col1_layout.DefaultSpacing = Drawing.Size(0, 8)
         
@@ -2468,7 +3468,7 @@ class GDSHubPanel(Forms.Form):
         
         col1_layout.Add(self._site_col1_split, xscale=True, yscale=True)
         
-        # ========== COLUMN 2: Renewable Energy (PV + SHW tabs) ==========
+        # --- COLUMN 2: Renewable Energy (PV + SHW tabs) ---
         grp_renewables = Forms.GroupBox(Text="Renewable Energy (HB Native)")
         renewables_layout = Forms.DynamicLayout()
         renewables_layout.Padding = Drawing.Padding(4)
@@ -2704,7 +3704,7 @@ class GDSHubPanel(Forms.Form):
         renewables_layout.Add(self.tab_site_renewables, xscale=True, yscale=True)
         grp_renewables.Content = renewables_layout
         
-        # ========== COLUMN 3: System Summary ==========
+        # --- COLUMN 3: System Summary ---
         grp_results = create_shaded_groupbox("System Summary")
         results_layout = Forms.DynamicLayout()
         results_layout.Padding = Drawing.Padding(4)
@@ -2755,7 +3755,7 @@ class GDSHubPanel(Forms.Form):
         columns = Forms.DynamicLayout()
         columns.BeginHorizontal()
         
-        # ========== LEFT COLUMN (3): Configuration Tabs ==========
+        # --- LEFT COLUMN (3): Configuration Tabs ---
         grp_config = Forms.GroupBox(Text="System Configuration")
         config_layout = Forms.DynamicLayout()
         config_layout.Padding = Drawing.Padding(4)
@@ -2946,7 +3946,7 @@ class GDSHubPanel(Forms.Form):
         config_layout.Add(self.tab_renewables_systems, xscale=True, yscale=True)
         grp_config.Content = config_layout
         
-        # ========== RIGHT COLUMN (1): IDF Preview ==========
+        # --- RIGHT COLUMN (1): IDF Preview ---
         grp_preview = create_shaded_groupbox("IDF Preview")
         preview_layout = Forms.DynamicLayout()
         preview_layout.DefaultSpacing = Drawing.Size(4, 4)
@@ -3017,7 +4017,7 @@ class GDSHubPanel(Forms.Form):
         columns.DefaultSpacing = Drawing.Size(8, 0)
         columns.BeginHorizontal()
         
-        # ========== LEFT: Parameters ==========
+        # --- LEFT: Parameters ---
         grp_params = create_shaded_groupbox("Parameters")
         params_layout = Forms.DynamicLayout()
         params_layout.Padding = Drawing.Padding(4)
@@ -3041,7 +4041,7 @@ class GDSHubPanel(Forms.Form):
         params_layout.Add(self.tab_eval_outputs, xscale=True, yscale=True)
         grp_params.Content = params_layout
         
-        # ========== RIGHT: Performance ==========
+        # --- RIGHT: Performance ---
         grp_perf = create_shaded_groupbox("Performance")
         perf_layout = Forms.DynamicLayout()
         perf_layout.Padding = Drawing.Padding(4)
@@ -3080,19 +4080,19 @@ class GDSHubPanel(Forms.Form):
         self.btn_select.Click += self._select_breps
         self.btn_load.Click += self._press_load_button
         self.btn_apply_in.Click += self._apply_input_notes
-        self.btn_resync.Click += self._resync
+        
         self.btn_clear.Click += self._clear_breps
         self.num_dup.ValueChanged += self._set_dup
         self.chk_run.CheckedChanged += self._set_run
         
-        # Space Conditioning (v62)
-        self.btn_load_blds_cond.Click += self._load_blds_for_conditioning
+        # Space Conditioning
+        self.btn_load_space_geo.Click += self._load_blds_for_conditioning
         self.btn_cond_select_all.Click += self._cond_select_all
         self.btn_cond_deselect_all.Click += self._cond_deselect_all
         self.btn_cond_preview.Click += self._preview_cond_selection
         self.btn_apply_cond.Click += self._apply_conditioning_status
         
-        # Quick Evaluation (v62)
+        # Quick Evaluation
         self.btn_resync_eval.Click += self._resync_eval
         self.btn_toggle_qe.Click += self._toggle_quick_eval
         
@@ -3101,11 +4101,14 @@ class GDSHubPanel(Forms.Form):
         self.btn_use_space_breps.Click += self._use_space_breps
         self.btn_deconstruct.Click += self._deconstruct_breps
         self.btn_preview.Click += self._preview_selection
+        self.dd_face_orient.SelectedIndexChanged += self._on_face_filter_changed
+        self.dd_face_bc.SelectedIndexChanged += self._on_face_filter_changed
         self.btn_gen_aperture.Click += self._generate_apertures
         self.btn_bake_aperture.Click += self._bake_apertures
         self.btn_send_to_gh.Click += self._send_apertures_to_gh
         self.btn_clear_applied_ap.Click += self._clear_applied_apertures
         self.btn_clear_baked_ap.Click += self._clear_baked_apertures
+        self.btn_resync_ap.Click += self._resync_apertures
         self.dropdown_ap_mode.SelectedIndexChanged += self._toggle_aperture_mode
         self.dropdown_door_mode.SelectedIndexChanged += self._toggle_door_mode
         self.btn_gen_door.Click += self._generate_doors
@@ -3113,10 +4116,12 @@ class GDSHubPanel(Forms.Form):
         self.btn_send_door_to_gh.Click += self._send_doors_to_gh
         self.btn_clear_applied_door.Click += self._clear_applied_doors
         self.btn_clear_baked_door.Click += self._clear_baked_doors
+        self.btn_resync_door.Click += self._resync_doors
         
         # Service Module
         self.btn_apply_preset.Click += self._apply_load_preset
         self.btn_apply_shw_preset.Click += self._apply_shw_preset
+        self.dd_shw_equipment.SelectedIndexChanged += self._on_shw_equipment_changed
         self.btn_preview_program.Click += self._preview_program
         self.btn_export_json.Click += self._export_program_json
         self.btn_load_rooms.Click += self._load_hb_rooms
@@ -3124,6 +4129,7 @@ class GDSHubPanel(Forms.Form):
         self.btn_assign_program.Click += self._assign_program_to_rooms
         self.btn_clear_pending.Click += self._clear_pending_assignments
         self.btn_output_programs.Click += self._send_modified_rooms_to_gh
+        self.btn_restore_session.Click += self._restore_session_to_pending
         self.btn_reload_gds.Click += self._reload_gds_database
         self.grid_rooms.SelectionChanged += self._on_room_selection_changed
         
@@ -3133,6 +4139,13 @@ class GDSHubPanel(Forms.Form):
         self.btn_fill_constant.Click += self._fill_custom_constant
         self.btn_save_custom.Click += self._save_custom_schedule
         self.btn_load_custom.Click += self._load_custom_schedules
+        
+        # Thermal Comfort settings
+        self.chk_comfort_enable.CheckedChanged += self._on_comfort_enable_changed
+        self.btn_send_comfort.Click += self._send_comfort_to_gh
+        self.btn_comfort_office.Click += self._comfort_preset_office
+        self.btn_comfort_residential.Click += self._comfort_preset_residential
+        self.btn_comfort_summer.Click += self._comfort_preset_summer
         
         # HVAC Module (simplified)
         self.dd_hvac_preset.SelectedIndexChanged += self._on_hvac_preset_changed
@@ -3204,44 +4217,53 @@ class GDSHubPanel(Forms.Form):
             available_width = self.ClientSize.Width - 60
             available_height = self.ClientSize.Height - 120  # Account for tabs, nav bar, padding
             
-            # ============ COLUMN WIDTH RATIOS ============
+            # --- COLUMN WIDTH RATIOS ---
             
-            # Calculate widths for 4:3:3 ratio (Envelope, Site modules)
+            # Calculate widths for 2:3:3 ratio (Envelope module)
+            unit_233 = available_width / 8.0
+            left_233 = int(unit_233 * 2)
+            mid_233 = int(unit_233 * 3)
+            right_233 = int(unit_233 * 3)
+            
+            # Calculate widths for 4:3:3 ratio (Site module)
             unit_433 = available_width / 10.0
             left_433 = int(unit_433 * 4)
             mid_433 = int(unit_433 * 3)
             right_433 = int(unit_433 * 3)
             
-            # Calculate widths for 3:4:3 ratio (Service/Schedule module)
+            # Calculate widths for 3.5:4:2.5 ratio (Service/Schedule module)
             unit_343 = available_width / 10.0
-            left_343 = int(unit_343 * 3)
+            left_343 = int(unit_343 * 3.5)
             mid_343 = int(unit_343 * 4)
-            right_343 = int(unit_343 * 3)
+            right_343 = int(unit_343 * 2.5)
             
             # Calculate widths for 4:6 ratio (Space module)
             unit_46 = available_width / 10.0
             left_46 = int(unit_46 * 4)
             
             # Minimum widths to prevent UI collapse
+            left_233 = max(left_233, 180)
+            mid_233 = max(mid_233, 220)
+            right_233 = max(right_233, 220)
             left_433 = max(left_433, 280)
             mid_433 = max(mid_433, 200)
             right_433 = max(right_433, 200)
-            left_343 = max(left_343, 250)
+            left_343 = max(left_343, 290)
             mid_343 = max(mid_343, 280)
-            right_343 = max(right_343, 250)
+            right_343 = max(right_343, 200)
             left_46 = max(left_46, 280)
             
             # Update Space module columns (4:6 ratio)
             if hasattr(self, '_space_col_left') and self._space_col_left:
                 self._space_col_left.Width = left_46
             
-            # Update Envelope module columns (4:3:3 ratio)
+            # Update Envelope module columns (2:3:3 ratio)
             if hasattr(self, '_env_col_left') and self._env_col_left:
-                self._env_col_left.Width = left_433
+                self._env_col_left.Width = left_233
             if hasattr(self, '_env_col_mid') and self._env_col_mid:
-                self._env_col_mid.Width = mid_433
+                self._env_col_mid.Width = mid_233
             if hasattr(self, '_env_col_right') and self._env_col_right:
-                self._env_col_right.Width = right_433
+                self._env_col_right.Width = right_233
             
             # Update Schedule module columns (3:4:3 ratio)
             if hasattr(self, '_sched_col_left') and self._sched_col_left:
@@ -3261,7 +4283,7 @@ class GDSHubPanel(Forms.Form):
             if hasattr(self, '_adv_col_right') and self._adv_col_right:
                 self._adv_col_right.Width = right_31
             
-            # ============ VERTICAL SPLITTER RATIOS ============
+            # --- VERTICAL SPLITTER RATIOS ---
             
             # Space Module - Column 1: Geometry Def / Input Panels = 1:1
             if hasattr(self, '_space_col1_split') and self._space_col1_split:
@@ -3321,7 +4343,7 @@ class GDSHubPanel(Forms.Form):
         else:
             blds_breps = get_breps_from_param(NAME_BLDS)
             if blds_breps:
-                self.lbl_envelope_status.Text = "'{}' has {} brep(s). Click 'Use Space Module Breps'".format(NAME_BLDS, len(blds_breps))
+                self.lbl_envelope_status.Text = "{} room(s) available. Click 'Use Upstream Rooms'".format(len(blds_breps))
             else:
                 self.lbl_envelope_status.Text = "No breps - select from Rhino or use Space Module"
             self.btn_deconstruct.Enabled = False
@@ -3370,6 +4392,25 @@ class GDSHubPanel(Forms.Form):
                     def update():
                         set_brep_components(self.collected_breps, NAME_BREP)
                     schedule(update)
+                    
+                    # Auto-populate Space Conditioning grid from selected breps
+                    try:
+                        self.cond_breps = list(self.collected_breps)
+                        self.cond_breps_data = []
+                        for i, brep in enumerate(self.collected_breps):
+                            try:
+                                vol = brep.GetVolume()
+                                vol_str = "{:.1f}".format(vol) if vol > 0 else "N/A"
+                            except:
+                                vol_str = "N/A"
+                            self.cond_breps_data.append([
+                                str(i + 1), "Space_{}".format(i + 1),
+                                vol_str, True
+                            ])
+                        self.grid_cond.DataStore = self.cond_breps_data
+                        self.lbl_cond_status.Text = "{} space(s) loaded".format(len(self.collected_breps))
+                    except:
+                        pass
                 else:
                     self.txt_brep_info.Text = "No Breps selected"
             else:
@@ -3422,7 +4463,7 @@ class GDSHubPanel(Forms.Form):
             for name, ta in self.txt_in_list:
                 ta.Text = get_first_input_panel_text(name)
             
-            # Update Quick Evaluation panel outputs (v62)
+            # Update Quick Evaluation panel outputs
             for name, ta in self.txt_eval_out_tabs:
                 ta.Text = get_output_panels_text(name)
             self.txt_eval_performance.Text = get_output_panels_text(NAME_PERFORMANCE)
@@ -3434,12 +4475,12 @@ class GDSHubPanel(Forms.Form):
         self.collected_breps = []
         self.txt_brep_info.Text = "No Breps selected"
     
-    # Space Conditioning handlers (v62)
+    # Space Conditioning handlers
     def _load_blds_for_conditioning(self, s, e):
         """Load breps from Blds component and populate conditioning grid"""
         blds_breps = get_breps_from_param(NAME_BLDS)
         if not blds_breps:
-            self.lbl_cond_status.Text = "No breps found in 'Blds' component"
+            self.lbl_cond_status.Text = "No spaces found. Define geometry first."
             return
         
         # Store actual breps for preview
@@ -3466,7 +4507,7 @@ class GDSHubPanel(Forms.Form):
         
         # Update grid
         self.grid_cond.DataStore = self.cond_breps_data
-        self.lbl_cond_status.Text = "{} space(s) loaded from 'Blds'".format(len(blds_breps))
+        self.lbl_cond_status.Text = "{} space(s) loaded".format(len(blds_breps))
     
     def _cond_select_all(self, s, e):
         """Set all spaces to conditioned"""
@@ -3513,7 +4554,7 @@ class GDSHubPanel(Forms.Form):
     def _apply_conditioning_status(self, s, e):
         """Send conditioning status list to GDS_Cond_Status data component"""
         if not self.cond_breps_data:
-            self.lbl_cond_status.Text = "No spaces loaded - click 'Load Blds Geometry' first"
+            self.lbl_cond_status.Text = "No spaces loaded — select geometry in the left panel first"
             return
         
         # Build boolean list matching Blds order
@@ -3537,7 +4578,7 @@ class GDSHubPanel(Forms.Form):
         else:
             self.lbl_cond_status.Text = "Error: Data component '{}' not found on canvas".format(NAME_COND_STATUS)
     
-    # Quick Evaluation handlers (v62)
+    # Quick Evaluation handlers
     def _resync_eval(self, s=None, e=None):
         """Re-sync outputs in Quick Evaluation panel"""
         try:
@@ -3665,6 +4706,47 @@ class GDSHubPanel(Forms.Form):
         
         self.grid_faces.DataStore = items
         self.lbl_envelope_status.Text = "{} faces from {} breps".format(len(self.surface_list), len(self.envelope_breps))
+        
+        # Populate backup for filter (additive — existing logic above is untouched)
+        self._full_face_items = []
+        for i, item in enumerate(items):
+            label, bc = item[0], item[1]
+            orient = "Wall"
+            if "(Roof)" in label:
+                orient = "Roof"
+            elif "(Floor)" in label:
+                orient = "Floor"
+            self._full_face_items.append((label, bc, orient, self.surface_list[i]))
+        self._full_surface_list = list(self.surface_list)
+        self.dd_face_orient.SelectedIndex = 0
+        self.dd_face_bc.SelectedIndex = 0
+    
+    def _on_face_filter_changed(self, s, e):
+        """Event handler for filter dropdown changes."""
+        if not self._full_face_items:
+            return
+        self._apply_face_filter()
+    
+    def _apply_face_filter(self):
+        """Rebuild surface_list and DataStore from backup, keeping grid[i]==surface_list[i]."""
+        orient_map = {1: "Wall", 2: "Roof", 3: "Floor"}
+        bc_map = {1: "Ext", 2: "Int"}
+        orient_filter = orient_map.get(self.dd_face_orient.SelectedIndex, None)
+        bc_filter = bc_map.get(self.dd_face_bc.SelectedIndex, None)
+        
+        new_items = []
+        new_surfaces = []
+        for label, bc, orient, brep in self._full_face_items:
+            if orient_filter and orient != orient_filter:
+                continue
+            if bc_filter and bc != bc_filter:
+                continue
+            new_items.append([label, bc])
+            new_surfaces.append(brep)
+        
+        self.surface_list = new_surfaces
+        self.grid_faces.DataStore = new_items
+        self.lbl_selection.Text = "Showing {} of {} faces".format(len(new_items), len(self._full_face_items))
     
     def _classify_wall_face(self, face_brep, all_faces, current_b_idx, current_f_idx):
         """Classify wall as Interior or Exterior based on adjacency to other breps"""
@@ -3813,8 +4895,10 @@ class GDSHubPanel(Forms.Form):
             return
         
         # Append newly generated apertures to cumulative list
+        batch_count = len(self.aperture_surfaces)
         for ap in self.aperture_surfaces:
             self.applied_apertures.append(ap)
+        self.aperture_surfaces = []
         
         def do():
             for comp in targets:
@@ -3829,7 +4913,7 @@ class GDSHubPanel(Forms.Form):
         press_button(NAME_APERTURE_SYNC)
         
         self.lbl_aperture_status.Text = "Added {} (total: {})".format(
-            len(self.aperture_surfaces), len(self.applied_apertures))
+            batch_count, len(self.applied_apertures))
         self.lbl_applied_ap_count.Text = "Applied: {} aperture(s)".format(len(self.applied_apertures))
     
     # Door handlers
@@ -3891,8 +4975,6 @@ class GDSHubPanel(Forms.Form):
         layer_name = get_first_input_panel_text("Layer to Bake&Refer")
         if not layer_name:
             layer_name = "Doors"
-        else:
-            layer_name = layer_name + "_Doors"
         
         try:
             old_ctx = sc.doc
@@ -3932,8 +5014,10 @@ class GDSHubPanel(Forms.Form):
             return
         
         # Append newly generated doors to cumulative list
+        batch_count = len(self.door_surfaces)
         for door in self.door_surfaces:
             self.applied_doors.append(door)
+        self.door_surfaces = []
         
         def do():
             for comp in targets:
@@ -3948,8 +5032,41 @@ class GDSHubPanel(Forms.Form):
         press_button(NAME_DOOR_SYNC)
         
         self.lbl_door_status.Text = "Added {} (total: {})".format(
-            len(self.door_surfaces), len(self.applied_doors))
+            batch_count, len(self.applied_doors))
         self.lbl_applied_door_count.Text = "Applied: {} door(s)".format(len(self.applied_doors))
+    
+    def _restore_applied_from_gh(self):
+        """Read existing breps from GH panels into cumulative lists on startup."""
+        try:
+            for obj in DOC.Objects:
+                if obj.NickName == NAME_APERTURE_SRF and "Brep" in obj.GetType().Name:
+                    pd = obj.PersistentData
+                    if pd.BranchCount > 0:
+                        branch = pd.get_Branch(0)
+                        for i in range(branch.Count):
+                            gh_brep = branch[i]
+                            if gh_brep and hasattr(gh_brep, 'Value') and gh_brep.Value:
+                                self.applied_apertures.append(gh_brep.Value)
+                    break
+        except Exception:
+            pass
+        try:
+            for obj in DOC.Objects:
+                if obj.NickName == NAME_DOOR_SRF and "Brep" in obj.GetType().Name:
+                    pd = obj.PersistentData
+                    if pd.BranchCount > 0:
+                        branch = pd.get_Branch(0)
+                        for i in range(branch.Count):
+                            gh_brep = branch[i]
+                            if gh_brep and hasattr(gh_brep, 'Value') and gh_brep.Value:
+                                self.applied_doors.append(gh_brep.Value)
+                    break
+        except Exception:
+            pass
+        if self.applied_apertures:
+            self.lbl_applied_ap_count.Text = "Applied: {} aperture(s)".format(len(self.applied_apertures))
+        if self.applied_doors:
+            self.lbl_applied_door_count.Text = "Applied: {} door(s)".format(len(self.applied_doors))
     
     def _clear_applied_apertures(self, s, e):
         """Clear all applied apertures from cumulative list and GH component"""
@@ -4031,8 +5148,6 @@ class GDSHubPanel(Forms.Form):
             layer_name = get_first_input_panel_text("Layer to Bake&Refer")
             if not layer_name:
                 layer_name = "Doors"
-            else:
-                layer_name = layer_name + "_Doors"
             
             old_ctx = sc.doc
             sc.doc = Rhino.RhinoDoc.ActiveDoc
@@ -4059,6 +5174,22 @@ class GDSHubPanel(Forms.Form):
         finally:
             sc.doc = old_ctx
     
+    def _resync_apertures(self, s, e):
+        """Press the ap_sync button on canvas to re-sync aperture data"""
+        try:
+            press_button(NAME_APERTURE_SYNC)
+            self.lbl_aperture_status.Text = "Re-synced apertures"
+        except Exception as ex:
+            self.lbl_aperture_status.Text = "Re-sync error: {}".format(str(ex)[:30])
+    
+    def _resync_doors(self, s, e):
+        """Press the door_sync button on canvas to re-sync door data"""
+        try:
+            press_button(NAME_DOOR_SYNC)
+            self.lbl_door_status.Text = "Re-synced doors"
+        except Exception as ex:
+            self.lbl_door_status.Text = "Re-sync error: {}".format(str(ex)[:30])
+    
     # Service Module handlers
     def _reload_gds_database(self, s, e):
         """Reload GDS database from path"""
@@ -4067,12 +5198,20 @@ class GDSHubPanel(Forms.Form):
             setp_count = len(self.gds_parser.setpoints) if self.gds_parser else 0
             prog_count = len(self.gds_parser.programs) if self.gds_parser else 0
             int_count = len(self.gds_parser.intensities) if self.gds_parser else 0
+            seasonal_count = sum(1 for v in (self.gds_parser.schedules or {}).values() if v.get('is_seasonal')) + \
+                             sum(1 for v in (self.gds_parser.setpoints or {}).values() if v.get('is_seasonal')) if self.gds_parser else 0
             
-            self.lbl_gds_status.Text = "GDS: {} sched, {} setp, {} prog, {} int".format(
+            status = "GDS: {} sched, {} setp, {} prog, {} int".format(
                 sched_count, setp_count, prog_count, int_count)
+            if seasonal_count > 0:
+                status += " ({} seasonal)".format(seasonal_count)
+            self.lbl_gds_status.Text = status
             
             # Repopulate dropdowns
             self._populate_schedule_dropdowns()
+            
+            # Re-apply saved dropdown selections now that [GDS] items are available
+            self._restore_service_dropdown_selections()
         else:
             self.lbl_gds_status.Text = "GDS: Failed to load (check path)"
     
@@ -4080,6 +5219,8 @@ class GDSHubPanel(Forms.Form):
         """Load HB Rooms from GH component"""
         self.hb_rooms = get_hb_rooms_from_param(NAME_HB_ROOMS_IN)
         self.pending_assignments.clear()  # Clear pending when loading new rooms
+        # NOTE: do NOT clear applied_programs or program_definitions here
+        # — they are needed for Restore Session after Rhino restart
         
         if not self.hb_rooms:
             self.lbl_rooms_status.Text = "No rooms found in '{}'".format(NAME_HB_ROOMS_IN)
@@ -4111,7 +5252,7 @@ class GDSHubPanel(Forms.Form):
                 self.hb_rooms_info.append({'index': i, 'name': 'Room_{}'.format(i), 'area': 0, 'program': 'Error'})
         
         self.grid_rooms.DataStore = items
-        self.lbl_rooms_status.Text = "{} rooms loaded from '{}'".format(len(self.hb_rooms), NAME_HB_ROOMS_IN)
+        self.lbl_rooms_status.Text = "{} room(s) loaded".format(len(self.hb_rooms))
     
     def _on_room_selection_changed(self, s, e):
         """Handle room selection change and show room details"""
@@ -4309,6 +5450,81 @@ class GDSHubPanel(Forms.Form):
         except Exception as ex:
             self.lbl_custom_status.Text = "Error: {}".format(str(ex)[:40])
     
+    # Thermal Comfort Settings handlers
+    def _on_comfort_enable_changed(self, s, e):
+        """Show/hide comfort parameters based on checkbox"""
+        enabled = self.chk_comfort_enable.Checked
+        self.pnl_comfort_params.Visible = enabled
+        self.btn_send_comfort.Enabled = enabled
+        if enabled:
+            self.lbl_comfort_status.Text = "Configure and click 'Send to GH'"
+        else:
+            self.lbl_comfort_status.Text = ""
+    
+    def _comfort_preset_office(self, s, e):
+        """Office preset: typical indoor office conditions"""
+        self.num_comfort_clothing.Value = 0.7
+        self.num_comfort_air_vel.Value = 0.1
+        self.num_comfort_work_eff.Value = 0.0
+        self.num_comfort_ankle_vel.Value = 0.0
+        self.dd_comfort_model.SelectedIndex = 0  # Fanger
+        self.chk_ashrae_warnings.Checked = False
+    
+    def _comfort_preset_residential(self, s, e):
+        """Residential preset: relaxed clothing, less activity"""
+        self.num_comfort_clothing.Value = 0.5
+        self.num_comfort_air_vel.Value = 0.1
+        self.num_comfort_work_eff.Value = 0.0
+        self.num_comfort_ankle_vel.Value = 0.0
+        self.dd_comfort_model.SelectedIndex = 0  # Fanger
+        self.chk_ashrae_warnings.Checked = False
+    
+    def _comfort_preset_summer(self, s, e):
+        """Summer preset: light clothing"""
+        self.num_comfort_clothing.Value = 0.5
+        self.num_comfort_air_vel.Value = 0.15
+        self.num_comfort_work_eff.Value = 0.0
+        self.num_comfort_ankle_vel.Value = 0.0
+        self.dd_comfort_model.SelectedIndex = 0  # Fanger
+        self.chk_ashrae_warnings.Checked = False
+    
+    def _send_comfort_to_gh(self, s, e):
+        """Format comfort settings and send to GH Panel"""
+        if not self.chk_comfort_enable.Checked:
+            self.lbl_comfort_status.Text = "Comfort simulation disabled"
+            return
+        
+        # Build settings string (key=value format)
+        parts = []
+        parts.append("clothing={}".format(self.num_comfort_clothing.Value))
+        parts.append("air_vel={}".format(self.num_comfort_air_vel.Value))
+        
+        # Only include if non-zero
+        if self.num_comfort_work_eff.Value > 0:
+            parts.append("work_eff={}".format(self.num_comfort_work_eff.Value))
+        if self.num_comfort_ankle_vel.Value > 0:
+            parts.append("ankle_vel={}".format(self.num_comfort_ankle_vel.Value))
+        
+        # Comfort model
+        model = str(self.dd_comfort_model.SelectedValue)
+        if model and model != "Fanger":  # Only include if not default
+            parts.append("comfort_model={}".format(model))
+        
+        # ASHRAE warnings
+        if self.chk_ashrae_warnings.Checked:
+            parts.append("ashrae_warnings=true")
+        
+        settings_str = ";".join(parts)
+        
+        # Send to GH Panel
+        try:
+            set_panel_text(NAME_COMFORT_SETTINGS, settings_str)
+            self.lbl_comfort_status.Text = "Sent to '{}'".format(NAME_COMFORT_SETTINGS)
+            self.lbl_comfort_status.TextColor = Drawing.Color.FromArgb(0, 128, 0)
+        except Exception as ex:
+            self.lbl_comfort_status.Text = "Error: {}".format(ex)
+            self.lbl_comfort_status.TextColor = Drawing.Color.FromArgb(200, 0, 0)
+    
     def _apply_load_preset(self, s, e):
         selected = str(self.dropdown_space_type.SelectedValue)
         
@@ -4353,6 +5569,27 @@ class GDSHubPanel(Forms.Form):
         except Exception as ex:
             print("SHW preset error: {}".format(ex))
     
+    def _update_shw_tank_visibility(self):
+        """Show/hide tank parameter fields based on equipment type selection."""
+        try:
+            equip = str(self.dd_shw_equipment.SelectedValue) if self.dd_shw_equipment.SelectedIndex >= 0 else "Gas_WaterHeater"
+            defaults = SHW_EQUIPMENT_DEFAULTS.get(equip, SHW_EQUIPMENT_DEFAULTS["Gas_WaterHeater"])
+            self.shw_tank_panel.Visible = defaults["has_tank"]
+        except:
+            self.shw_tank_panel.Visible = True
+    
+    def _on_shw_equipment_changed(self, sender, e):
+        """Update visibility and auto-populate defaults on equipment type change."""
+        try:
+            equip = str(self.dd_shw_equipment.SelectedValue)
+            defaults = SHW_EQUIPMENT_DEFAULTS.get(equip, {})
+            self._update_shw_tank_visibility()
+            if defaults:
+                self.num_shw_efficiency.Value = defaults["efficiency"]
+                self.num_shw_tank_ua.Value = defaults["tank_ua"]
+        except Exception as ex:
+            print("SHW equip change: {}".format(ex))
+    
     def _collect_program_data(self):
         self.program_data.identifier = self.txt_program_id.Text
         
@@ -4387,6 +5624,351 @@ class GDSHubPanel(Forms.Form):
             self.program_data.shw_latent_fraction = float(self.num_shw_latent.Value)
             if hasattr(self, 'dd_shw_schedule') and self.dd_shw_schedule.SelectedValue:
                 self.program_data.shw_schedule = str(self.dd_shw_schedule.SelectedValue)
+    
+    def _get_session_path(self):
+        """Derive session JSON path from GH document filepath."""
+        try:
+            gh_path = DOC.FilePath
+            if gh_path:
+                base = os.path.splitext(gh_path)[0]
+                return base + "_gds_session.json"
+        except Exception:
+            pass
+        return None
+    
+    def _save_service_state(self):
+        """Save Service Module widget state to sc.sticky for persistence across reopens."""
+        def dd_val(dd):
+            try:
+                return str(dd.SelectedValue) if dd.SelectedIndex >= 0 else ""
+            except:
+                return ""
+        
+        state = {
+            # Program identity
+            'program_id': self.txt_program_id.Text,
+            # Load intensities
+            'people_density': float(self.num_people_density.Value),
+            'lighting_power': float(self.num_lighting_power.Value),
+            'equipment_power': float(self.num_equipment_power.Value),
+            'gas_power': float(self.num_gas_power.Value),
+            'infiltration': float(self.num_infiltration.Value),
+            'vent_person': float(self.num_vent_person.Value),
+            'vent_area': float(self.num_vent_area.Value),
+            # SHW
+            'shw_flow': float(self.num_shw_flow.Value),
+            'shw_temp': float(self.num_shw_temp.Value),
+            'shw_sensible': float(self.num_shw_sensible.Value),
+            'shw_latent': float(self.num_shw_latent.Value),
+            'shw_schedule': dd_val(self.dd_shw_schedule),
+            'shw_equipment': dd_val(self.dd_shw_equipment) if hasattr(self, 'dd_shw_equipment') else "Gas_WaterHeater",
+            'shw_tank_ua': float(self.num_shw_tank_ua.Value) if hasattr(self, 'num_shw_tank_ua') else 6.0,
+            'shw_ambient': float(self.num_shw_ambient.Value) if hasattr(self, 'num_shw_ambient') else 22.0,
+            'shw_efficiency': float(self.num_shw_efficiency.Value) if hasattr(self, 'num_shw_efficiency') else 1.0,
+            'shw_preset': dd_val(self.dd_shw_load_preset),
+            # Schedule assignments
+            'sched_occ_wd': dd_val(self.dd_occ_wd),
+            'sched_occ_we': dd_val(self.dd_occ_we),
+            'sched_lighting': dd_val(self.dd_lighting),
+            'sched_equipment': dd_val(self.dd_equipment),
+            'sched_infiltration': dd_val(self.dd_infiltration),
+            'sched_heating': dd_val(self.dd_heating),
+            'sched_cooling': dd_val(self.dd_cooling),
+            'sched_activity': dd_val(self.dd_activity),
+            # Comfort settings
+            'comfort_enable': bool(self.chk_comfort_enable.Checked),
+            'comfort_model': dd_val(self.dd_comfort_model),
+            'comfort_clothing': float(self.num_comfort_clothing.Value),
+            'comfort_air_vel': float(self.num_comfort_air_vel.Value),
+            'comfort_work_eff': float(self.num_comfort_work_eff.Value),
+            'comfort_ankle_vel': float(self.num_comfort_ankle_vel.Value),
+            'ashrae_warnings': bool(self.chk_ashrae_warnings.Checked),
+            # Pending assignments (serializable)
+            'pending_assignments': {str(k): v for k, v in self.pending_assignments.items()},
+            # Applied programs (sent to GH, for display only)
+            'applied_programs': {str(k): v for k, v in self.applied_programs.items()},
+            # Program definitions (HB JSON dicts, for re-Apply after reopen)
+            'program_definitions': dict(self.program_definitions) if self.program_definitions else {},
+            # Custom schedules
+            'custom_schedules': dict(self.saved_custom_schedules) if self.saved_custom_schedules else {},
+        }
+        sc.sticky[SERVICE_STORAGE_KEY] = state
+        
+        # Also persist to file for survival across Rhino restarts
+        try:
+            fpath = self._get_session_path()
+            if fpath:
+                with open(fpath, 'w') as f:
+                    json.dump(state, f, indent=2)
+                print("[GDS] Service state saved to file: {}".format(fpath))
+            else:
+                print("[GDS] Service state NOT saved to file (no GH file path)")
+        except Exception as ex:
+            print("[GDS] Service state file save error: {}".format(ex))
+    
+    def _publish_contam_occupancy(self):
+        """Publish per-room occupancy data to sc.sticky for CONTAM pipeline.
+        
+        Reads from self.applied_programs (room_index -> program_name) and
+        self.program_definitions (program_name -> HB ProgramType dict) to
+        build a lightweight occupancy dict keyed by room name.
+        
+        Stored in sc.sticky["GDS_CONTAM_OCC"] for wireless pickup by RUNNER.
+        """
+        if not self.applied_programs or not self.program_definitions:
+            return
+        if not self.hb_rooms_info:
+            return
+        
+        occ_data = {"rooms": {}}
+        published = 0
+        
+        for idx_str, prog_name in self.applied_programs.items():
+            idx = int(idx_str)
+            if idx >= len(self.hb_rooms_info):
+                continue
+            
+            prog_dict = self.program_definitions.get(prog_name)
+            if not prog_dict or not isinstance(prog_dict, dict):
+                continue
+            
+            room_info = self.hb_rooms_info[idx]
+            room_name = room_info.get('name', 'Room_{}'.format(idx))
+            room_area = room_info.get('area', 30.0)
+            
+            # Extract occupancy from HB ProgramType dict
+            people = prog_dict.get('people', {})
+            if not people:
+                continue
+            
+            ppa = people.get('people_per_area', 0)
+            if ppa is None or not isinstance(ppa, (int, float)):
+                ppa = 0
+            occ_count = max(1, int(round(ppa * room_area))) if ppa > 0 else 1
+            
+            # Parse occupancy schedule (HB ScheduleRuleset format)
+            occ_sched = people.get('occupancy_schedule', {})
+            if not isinstance(occ_sched, dict):
+                continue
+            
+            # Build day_schedule value lookup
+            ds_map = {}
+            for ds in occ_sched.get('day_schedules', []):
+                if isinstance(ds, dict) and 'identifier' in ds:
+                    vals = ds.get('values', [0.0] * 24)
+                    if isinstance(vals, list) and len(vals) == 24:
+                        ds_map[ds['identifier']] = vals
+            
+            if not ds_map:
+                continue
+            
+            # Weekend = default_day_schedule
+            default_name = occ_sched.get('default_day_schedule', '')
+            weekend_vals = ds_map.get(default_name, [0.0] * 24)
+            
+            # Weekday = first rule with apply_monday
+            weekday_vals = None
+            for rule in occ_sched.get('schedule_rules', []):
+                if isinstance(rule, dict) and (rule.get('apply_monday') or
+                                                rule.get('apply_tuesday')):
+                    wd_name = rule.get('schedule_day', '')
+                    weekday_vals = ds_map.get(wd_name)
+                    break
+            if weekday_vals is None:
+                weekday_vals = weekend_vals
+            
+            # Extract seasonal rules (rules with date ranges different from Jan1-Dec31)
+            seasonal = []
+            for rule in occ_sched.get('schedule_rules', []):
+                if not isinstance(rule, dict):
+                    continue
+                sd = rule.get('start_date', [1, 1])
+                ed = rule.get('end_date', [12, 31])
+                # Skip the default full-year rule (already captured as weekday/weekend)
+                if sd == [1, 1] and ed == [12, 31]:
+                    continue
+                
+                sch_day_name = rule.get('schedule_day', '')
+                rule_vals = ds_map.get(sch_day_name)
+                if not rule_vals:
+                    continue
+                
+                is_wd = rule.get('apply_monday') or rule.get('apply_tuesday')
+                is_we = rule.get('apply_saturday') or rule.get('apply_sunday')
+                
+                # Build seasonal entry — use rule vals for the appropriate day type
+                sr = {
+                    "start": sd,
+                    "end": ed,
+                    "weekday": rule_vals if is_wd else weekday_vals,
+                    "weekend": rule_vals if is_we else weekend_vals,
+                }
+                seasonal.append(sr)
+            
+            # Store room entry
+            room_entry = {
+                "occupants": occ_count,
+                "weekday": weekday_vals,
+                "weekend": weekend_vals,
+            }
+            if seasonal:
+                room_entry["seasonal"] = seasonal
+            
+            occ_data["rooms"][room_name] = room_entry
+            published += 1
+        
+        # Publish to sc.sticky
+        if published > 0:
+            sc.sticky["GDS_CONTAM_OCC"] = occ_data
+            print("[GDS] CONTAM occupancy published: {} rooms".format(published))
+    
+    def _restore_service_state(self):
+        """Restore Service Module widget state from sc.sticky or session file."""
+        state = None
+        if SERVICE_STORAGE_KEY in sc.sticky:
+            state = sc.sticky[SERVICE_STORAGE_KEY]
+            print("[GDS] Service state loaded from sc.sticky")
+        else:
+            # Fallback: read from session file (survives Rhino restart)
+            try:
+                fpath = self._get_session_path()
+                print("[GDS] Session file path: {}".format(fpath))
+                if fpath and os.path.isfile(fpath):
+                    with open(fpath, 'r') as f:
+                        state = json.load(f)
+                    sc.sticky[SERVICE_STORAGE_KEY] = state
+                    print("[GDS] Service state loaded from file ({} keys)".format(len(state)))
+                else:
+                    print("[GDS] Session file not found")
+            except Exception as ex:
+                print("[GDS] Session file read error: {}".format(ex))
+        
+        if not isinstance(state, dict):
+            print("[GDS] No service state to restore")
+            return
+        
+        def set_dd(dd, val):
+            """Set dropdown selection by matching value string."""
+            if not val:
+                return
+            for i in range(dd.Items.Count):
+                if str(dd.Items[i]) == val:
+                    dd.SelectedIndex = i
+                    return
+        
+        try:
+            # Program identity
+            self.txt_program_id.Text = state.get('program_id', 'GDS_Custom_Program')
+            
+            # Load intensities
+            self.num_people_density.Value = state.get('people_density', 0.0)
+            self.num_lighting_power.Value = state.get('lighting_power', 10.76)
+            self.num_equipment_power.Value = state.get('equipment_power', 10.76)
+            self.num_gas_power.Value = state.get('gas_power', 0.0)
+            self.num_infiltration.Value = state.get('infiltration', 0.0003)
+            self.num_vent_person.Value = state.get('vent_person', 0.006)
+            self.num_vent_area.Value = state.get('vent_area', 0.0003)
+            
+            # SHW
+            self.num_shw_flow.Value = state.get('shw_flow', 0.0)
+            self.num_shw_temp.Value = state.get('shw_temp', 49.0)
+            self.num_shw_sensible.Value = state.get('shw_sensible', 0.2)
+            self.num_shw_latent.Value = state.get('shw_latent', 0.05)
+            set_dd(self.dd_shw_load_preset, state.get('shw_preset', ''))
+            if hasattr(self, 'dd_shw_equipment'):
+                set_dd(self.dd_shw_equipment, state.get('shw_equipment', 'Gas_WaterHeater'))
+            if hasattr(self, 'num_shw_tank_ua'):
+                self.num_shw_tank_ua.Value = state.get('shw_tank_ua', 6.0)
+            if hasattr(self, 'num_shw_ambient'):
+                self.num_shw_ambient.Value = state.get('shw_ambient', 22.0)
+            if hasattr(self, 'num_shw_efficiency'):
+                self.num_shw_efficiency.Value = state.get('shw_efficiency', 1.0)
+            self._update_shw_tank_visibility()
+            
+            # Schedule assignments (dropdowns must be populated first)
+            set_dd(self.dd_occ_wd, state.get('sched_occ_wd', ''))
+            set_dd(self.dd_occ_we, state.get('sched_occ_we', ''))
+            set_dd(self.dd_lighting, state.get('sched_lighting', ''))
+            set_dd(self.dd_equipment, state.get('sched_equipment', ''))
+            set_dd(self.dd_infiltration, state.get('sched_infiltration', ''))
+            set_dd(self.dd_heating, state.get('sched_heating', ''))
+            set_dd(self.dd_cooling, state.get('sched_cooling', ''))
+            set_dd(self.dd_activity, state.get('sched_activity', ''))
+            set_dd(self.dd_shw_schedule, state.get('shw_schedule', ''))
+            
+            # Comfort settings
+            self.chk_comfort_enable.Checked = state.get('comfort_enable', False)
+            set_dd(self.dd_comfort_model, state.get('comfort_model', 'Fanger'))
+            self.num_comfort_clothing.Value = state.get('comfort_clothing', 0.7)
+            self.num_comfort_air_vel.Value = state.get('comfort_air_vel', 0.1)
+            self.num_comfort_work_eff.Value = state.get('comfort_work_eff', 0.0)
+            self.num_comfort_ankle_vel.Value = state.get('comfort_ankle_vel', 0.0)
+            self.chk_ashrae_warnings.Checked = state.get('ashrae_warnings', False)
+            self.pnl_comfort_params.Visible = state.get('comfort_enable', False)
+            self.btn_send_comfort.Enabled = state.get('comfort_enable', False)
+            
+            # Pending assignments
+            pending = state.get('pending_assignments', {})
+            if pending:
+                self.pending_assignments = {int(k): v for k, v in pending.items()}
+            
+            # Applied programs (display tracking)
+            applied = state.get('applied_programs', {})
+            if applied:
+                self.applied_programs = {int(k): v for k, v in applied.items()}
+            
+            # Program definitions (for re-Apply)
+            prog_defs = state.get('program_definitions', {})
+            if prog_defs:
+                self.program_definitions = prog_defs
+                print("[GDS] Restored {} program definition(s): {}".format(
+                    len(prog_defs), ", ".join(prog_defs.keys())))
+            
+            # Custom schedules
+            custom = state.get('custom_schedules', {})
+            if custom:
+                self.saved_custom_schedules = custom
+            
+        except Exception as ex:
+            print("[GDS] Service state restore error: {}".format(ex))
+            import traceback
+            traceback.print_exc()
+    
+    def _restore_service_dropdown_selections(self):
+        """Re-apply only dropdown selections from saved state.
+        Called after GDS database reload, when [GDS] items become available.
+        Does NOT touch spinbox values (those are already correct)."""
+        state = None
+        if SERVICE_STORAGE_KEY in sc.sticky:
+            state = sc.sticky[SERVICE_STORAGE_KEY]
+        if not isinstance(state, dict):
+            return
+        
+        def set_dd(dd, val):
+            if not val:
+                return
+            for i in range(dd.Items.Count):
+                if str(dd.Items[i]) == val:
+                    dd.SelectedIndex = i
+                    return
+        
+        try:
+            set_dd(self.dd_occ_wd, state.get('sched_occ_wd', ''))
+            set_dd(self.dd_occ_we, state.get('sched_occ_we', ''))
+            set_dd(self.dd_lighting, state.get('sched_lighting', ''))
+            set_dd(self.dd_equipment, state.get('sched_equipment', ''))
+            set_dd(self.dd_infiltration, state.get('sched_infiltration', ''))
+            set_dd(self.dd_heating, state.get('sched_heating', ''))
+            set_dd(self.dd_cooling, state.get('sched_cooling', ''))
+            set_dd(self.dd_activity, state.get('sched_activity', ''))
+            if hasattr(self, 'dd_shw_schedule'):
+                set_dd(self.dd_shw_schedule, state.get('shw_schedule', ''))
+            if hasattr(self, 'dd_shw_equipment'):
+                set_dd(self.dd_shw_equipment, state.get('shw_equipment', ''))
+            set_dd(self.dd_shw_load_preset, state.get('shw_preset', ''))
+            set_dd(self.dd_comfort_model, state.get('comfort_model', ''))
+        except Exception as ex:
+            print("Dropdown selection restore error: {}".format(ex))
     
     def _update_program_summary(self):
         self._collect_program_data()
@@ -4458,6 +6040,9 @@ class GDSHubPanel(Forms.Form):
         program_dict = self.program_data.to_program_dict(self.gds_parser)
         program_name = self.program_data.identifier
         
+        # Store program definition for re-Apply persistence
+        self.program_definitions[program_name] = program_dict
+        
         # Store pending assignment for each selected room
         for idx in selected:
             if idx < len(self.hb_rooms):
@@ -4474,6 +6059,112 @@ class GDSHubPanel(Forms.Form):
         
         self.txt_program_summary.Text = "Queued '{}' for {} room(s).\n\nPending assignments shown with * prefix.\nClick 'Apply' to apply and export.".format(
             program_name, len(selected))
+        
+        # Save state for persistence
+        self._save_service_state()
+    
+    def _restore_session_to_pending(self, s, e):
+        """Restore all room-program assignments from stored session directly to GH canvas.
+        Writes to GDS_Program panel exactly like Apply does — no room loading needed."""
+        if not self.program_definitions or not self.applied_programs:
+            self.txt_program_summary.Text = "No stored session found. Define programs and Apply first."
+            return
+        
+        def expire_with_group(comp):
+            comp.ExpireSolution(True)
+            try:
+                for obj in DOC.Objects:
+                    if hasattr(obj, 'Objects'):
+                        if comp in obj.Objects():
+                            obj.ExpireSolution(True)
+            except:
+                pass
+        
+        try:
+            from Grasshopper.Kernel.Types import GH_ObjectWrapper
+            
+            # Determine total room count from stored mapping
+            max_idx = max(int(k) for k in self.applied_programs.keys())
+            total_rooms = max_idx + 1
+            
+            # Build program JSON list 1:1 matching room indices
+            program_jsons = []
+            restored_count = 0
+            missing_defs = set()
+            
+            for i in range(total_rooms):
+                prog_name = self.applied_programs.get(i, self.applied_programs.get(str(i), None))
+                if prog_name and prog_name in self.program_definitions:
+                    program_dict = dict(self.program_definitions[prog_name])  # copy
+                    program_dict['identifier'] = "{}_R{}".format(prog_name, i)
+                    program_jsons.append(json.dumps(program_dict))
+                    restored_count += 1
+                elif prog_name:
+                    missing_defs.add(prog_name)
+                    program_jsons.append("")
+                else:
+                    program_jsons.append("")
+            
+            # Write to GDS_Program panel on canvas
+            program_targets = []
+            for obj in DOC.Objects:
+                if obj.NickName == NAME_PROGRAM_OUTPUT:
+                    program_targets.append(obj)
+            
+            if not program_targets:
+                self.txt_program_summary.Text = "Error: '{}' panel not found on canvas.".format(NAME_PROGRAM_OUTPUT)
+                return
+            
+            def do_program_output():
+                for comp in program_targets:
+                    comp.PersistentData.Clear()
+                    for prog_json in program_jsons:
+                        comp.PersistentData.Append(GH_ObjectWrapper(prog_json))
+                    expire_with_group(comp)
+            schedule(do_program_output)
+            
+            # Also restore SHW config from current widget state
+            shw_equip_type = str(self.dd_shw_equipment.SelectedValue) if hasattr(self, 'dd_shw_equipment') and self.dd_shw_equipment.SelectedValue else "Gas_WaterHeater"
+            shw_system_config = {
+                "equipment_type": shw_equip_type,
+                "efficiency": float(self.num_shw_efficiency.Value) if hasattr(self, 'num_shw_efficiency') else 1.0,
+                "tank_ua": float(self.num_shw_tank_ua.Value) if hasattr(self, 'num_shw_tank_ua') else 6.0,
+                "ambient": float(self.num_shw_ambient.Value) if hasattr(self, 'num_shw_ambient') else 22.0,
+            }
+            sc.sticky[SHW_STICKY_KEY] = shw_system_config
+            
+            shw_targets = []
+            for obj in DOC.Objects:
+                if obj.NickName == NAME_SHW_SYSTEM:
+                    shw_targets.append(obj)
+            if shw_targets:
+                def do_shw_output():
+                    for comp in shw_targets:
+                        comp.PersistentData.Clear()
+                        comp.PersistentData.Append(GH_ObjectWrapper(shw_equip_type))
+                        expire_with_group(comp)
+                schedule(do_shw_output)
+            
+            # Publish occupancy for CONTAM pipeline (wireless bridge)
+            self._publish_contam_occupancy()
+            
+            # Summary
+            summary = "Restored {} of {} room(s) from {} program(s): {}\nSHW: {}".format(
+                restored_count, total_rooms,
+                len(self.program_definitions),
+                ", ".join(sorted(self.program_definitions.keys())),
+                shw_equip_type)
+            if missing_defs:
+                summary += "\nMissing definitions: {}".format(", ".join(sorted(missing_defs)))
+            self.txt_program_summary.Text = summary
+            print("[GDS] Session restored to GH: {} rooms, {} definitions".format(
+                restored_count, len(self.program_definitions)))
+        
+        except Exception as ex:
+            self.txt_program_summary.Text = "Restore error: {}".format(ex)
+            print("[GDS] Restore session error: {}".format(ex))
+            import traceback
+            traceback.print_exc()
     
     def _update_room_exam_panel(self, selected_indices):
         """Update the room examination panel for given indices"""
@@ -4510,6 +6201,8 @@ class GDSHubPanel(Forms.Form):
                     if 'electric_equipment' in pending_dict:
                         epd = pending_dict['electric_equipment'].get('watts_per_area', 0)
                         info_lines.append(u"  Equipment: {:.2f} W/m²".format(epd))
+                elif idx in self.applied_programs:
+                    info_lines.append(u"\u2713 APPLIED: {}".format(self.applied_programs[idx]))
                 else:
                     # Show current program info
                     if hasattr(room, 'properties') and hasattr(room.properties, 'energy'):
@@ -4551,9 +6244,11 @@ class GDSHubPanel(Forms.Form):
                 name = getattr(room, 'display_name', getattr(room, 'identifier', 'Room_{}'.format(i)))
                 area = getattr(room, 'floor_area', 0)
                 
-                # Check for pending assignment first
+                # Tier priority: pending (not yet sent) > applied (sent to GH) > input room
                 if i in self.pending_assignments:
-                    prog_name = "*" + self.pending_assignments[i]['program_name'][:14]
+                    prog_name = "\u2605 " + self.pending_assignments[i]['program_name'][:13]
+                elif i in self.applied_programs:
+                    prog_name = "\u2713 " + self.applied_programs[i][:13]
                 else:
                     prog_name = "None"
                     if hasattr(room, 'properties') and hasattr(room.properties, 'energy'):
@@ -4642,21 +6337,57 @@ class GDSHubPanel(Forms.Form):
                 self.txt_program_summary.Text = "Error: '{}' not found on canvas.".format(NAME_PROGRAM_OUTPUT)
                 return
             
-            # Clear pending
+            # Build SHW system config and store in sc.sticky for Refiner
+            shw_equip_type = str(self.dd_shw_equipment.SelectedValue) if hasattr(self, 'dd_shw_equipment') and self.dd_shw_equipment.SelectedValue else "Gas_WaterHeater"
+            shw_system_config = {
+                "equipment_type": shw_equip_type,
+                "efficiency": float(self.num_shw_efficiency.Value) if hasattr(self, 'num_shw_efficiency') else SHW_EQUIPMENT_DEFAULTS.get(shw_equip_type, {}).get("efficiency", 1.0),
+                "tank_ua": float(self.num_shw_tank_ua.Value) if hasattr(self, 'num_shw_tank_ua') else 6.0,
+                "ambient": float(self.num_shw_ambient.Value) if hasattr(self, 'num_shw_ambient') else 22.0,
+            }
+            sc.sticky[SHW_STICKY_KEY] = shw_system_config
+            
+            # Also output to GDS_SHW_System panel (backward compatible)
+            shw_targets = []
+            for obj in DOC.Objects:
+                if obj.NickName == NAME_SHW_SYSTEM:
+                    shw_targets.append(obj)
+            if shw_targets:
+                def do_shw_output():
+                    for comp in shw_targets:
+                        comp.PersistentData.Clear()
+                        comp.PersistentData.Append(GH_ObjectWrapper(shw_equip_type))
+                        expire_with_group(comp)
+                schedule(do_shw_output)
+            
+            # Transfer pending → applied (so grid still shows what was assigned)
+            for k, v in self.pending_assignments.items():
+                self.applied_programs[k] = v['program_name']
+            
+            # Clear pending (they've been sent to GH)
             self.pending_assignments.clear()
             self._refresh_room_grid()
             
+            # Save service module state for persistence (after clearing pending)
+            self._save_service_state()
+            
+            # Publish occupancy data for CONTAM pipeline (wireless bridge)
+            self._publish_contam_occupancy()
             selected = list(self.grid_rooms.SelectedRows)
             if selected:
                 self._update_room_exam_panel(selected)
             
             self.txt_program_summary.Text = (
-                "Output {} room(s), {} with new programs.\n\n"
+                "Output {} room(s), {} with new programs.\n"
+                "SHW: {} (eff={}, UA={} W/K, amb={}C)\n\n"
                 "GH Setup:\n"
                 "[{}] -> [HB Str to Obj] -> programs\n"
-                "[HB_Rooms] + programs -> [HB Apply ProgramType]\n\n"
+                "[HB_Rooms] + programs -> [HB Apply ProgramType]\n"
+                "SHW: auto-injected by Refiner into hbjson\n\n"
                 "Both lists are 1:1 matched."
-            ).format(len(self.hb_rooms), assigned_count, NAME_PROGRAM_OUTPUT)
+            ).format(len(self.hb_rooms), assigned_count, shw_equip_type,
+                     shw_system_config["efficiency"], shw_system_config["tank_ua"],
+                     shw_system_config["ambient"], NAME_PROGRAM_OUTPUT)
             
             # Update initialization status
             self.lbl_init_status.Text = "✓ Initialization complete"
@@ -4870,7 +6601,7 @@ class GDSHubPanel(Forms.Form):
         except Exception as ex:
             print("Site resync error: {}".format(ex))
     
-    # ==================== RENEWABLE ENERGY HANDLERS ====================
+    # --- RENEWABLE ENERGY HANDLERS ---
     
     def _on_pv_preset_changed(self, s, e):
         """Update parameters when preset changes"""
@@ -5097,7 +6828,7 @@ class GDSHubPanel(Forms.Form):
         if "GDS_PV_CONFIG" in sc.sticky:
             del sc.sticky["GDS_PV_CONFIG"]
     
-    # ==================== MODULE 6: RENEWABLES HANDLERS ====================
+    # --- MODULE 6: RENEWABLES HANDLERS ---
     
     def _on_batt_preset_changed(self, s, e):
         """Update battery parameters from preset"""
@@ -5336,7 +7067,7 @@ Generator:WindTurbine,
             self.btn_customize_idf.Text = "Customize from Here"
             self.txt_idf_preview.BackgroundColor = Drawing.Colors.White
     
-    # ==================== HVAC MODULE HANDLERS (Simplified) ====================
+    # --- HVAC MODULE HANDLERS (Simplified) ---
     
     def _update_hvac_details(self):
         """Update details text based on selected preset"""
@@ -5378,7 +7109,7 @@ Generator:WindTurbine,
                     'demand_controlled_ventilation': p.get('demand_controlled_ventilation', False),
                 }
                 sc.sticky[HVAC_DEFAULT_KEY] = config
-                self.lbl_hvac_status.Text = "Default set: {} - Apply via GDSGBE".format(name)
+                self.lbl_hvac_status.Text = "Default set: {} \u2014 Refiner will auto-apply to all rooms".format(name)
         except Exception as ex:
             self.lbl_hvac_status.Text = "Error: {}".format(str(ex))
 
@@ -5420,6 +7151,11 @@ def _run(button_input):
         ui.Closed += _cleanup
         
         try:
+            ui._restore_applied_from_gh()
+        except Exception:
+            pass
+        
+        try:
             if hasattr(sc.sticky, '__setitem__'):
                 sc.sticky[KEY] = ui
         except:
@@ -5430,7 +7166,6 @@ def _run(button_input):
     except Exception as e:
         print("Error creating window: {}".format(e))
         return False
-
 
 # Main execution
 try:

@@ -1,0 +1,875 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>GDS Results Comparison</title>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+:root{
+  --bg:#0c1220;--bg2:#141e33;--card:rgba(255,255,255,0.025);--card2:rgba(255,255,255,0.04);
+  --border:rgba(255,255,255,0.07);--border2:rgba(255,255,255,0.12);
+  --t1:#e8ecf4;--t2:#8b95a8;--t3:#5a6478;
+  --green:#4ade80;--green-bg:rgba(74,222,128,0.08);
+  --blue:#60a5fa;--blue-bg:rgba(96,165,250,0.08);
+  --orange:#fbbf24;--orange-bg:rgba(251,191,36,0.08);
+  --red:#f87171;--red-bg:rgba(248,113,113,0.08);
+  --purple:#a78bfa;--purple-bg:rgba(167,139,250,0.08);
+  --cyan:#22d3ee;--cyan-bg:rgba(34,211,238,0.08);
+  --design:#4ade80;--reference:#60a5fa;
+}
+body{font-family:'DM Sans',system-ui,sans-serif;background:var(--bg);color:var(--t1);min-height:100vh}
+.header{background:var(--bg2);border-bottom:1px solid var(--border);padding:14px 28px;display:flex;justify-content:space-between;align-items:center}
+.header h1{font-size:18px;font-weight:700;letter-spacing:-0.3px}
+.header h1 span{color:var(--green)}
+.meta{text-align:right;font-size:12px;color:var(--t3)}
+.meta .name{color:var(--t2);font-weight:500}
+.case-legend{display:flex;gap:16px;align-items:center;font-size:11px;color:var(--t2);margin-top:4px}
+.case-dot{width:8px;height:8px;border-radius:2px;display:inline-block;margin-right:4px}
+.tabs{display:flex;gap:2px;padding:0 28px;background:var(--bg2);border-bottom:1px solid var(--border);overflow-x:auto}
+.tab{padding:12px 18px;font-size:12px;font-weight:500;color:var(--t3);cursor:pointer;border-bottom:2px solid transparent;transition:all 0.2s;white-space:nowrap}
+.tab:hover{color:var(--t2)}
+.tab.active{color:var(--green);border-bottom-color:var(--green)}
+.main{padding:24px 28px;max-width:1440px;margin:0 auto}
+.section{display:none}.section.active{display:block}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:14px;margin-bottom:20px}
+.grid-2{display:grid;grid-template-columns:repeat(2,1fr);gap:14px;margin-bottom:20px}
+.grid-3{display:grid;grid-template-columns:repeat(3,1fr);gap:14px}
+.grid-5{display:grid;grid-template-columns:repeat(5,1fr);gap:14px;margin-bottom:20px}
+@media(max-width:900px){.grid-2,.grid-3,.grid-5{grid-template-columns:1fr}}
+.card{background:var(--card);border:1px solid var(--border);border-radius:10px;padding:18px}
+.card.span-2{grid-column:span 2}@media(max-width:900px){.card.span-2{grid-column:span 1}}
+.card-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:14px}
+.card-title{font-size:12px;font-weight:600;color:var(--t3);text-transform:uppercase;letter-spacing:0.8px}
+.badge{font-size:10px;padding:3px 10px;border-radius:10px;font-weight:500}
+.badge.green{background:var(--green-bg);color:var(--green)}
+.badge.red{background:var(--red-bg);color:var(--red)}
+.badge.blue{background:var(--blue-bg);color:var(--blue)}
+.badge.orange{background:var(--orange-bg);color:var(--orange)}
+.badge.neutral{background:rgba(255,255,255,0.05);color:var(--t2)}
+.metric{display:flex;align-items:baseline;gap:6px}
+.metric .val{font-size:28px;font-weight:700;font-family:'JetBrains Mono','DM Sans',monospace}
+.metric .unit{font-size:12px;color:var(--t3)}
+.metric-sm .val{font-size:22px}
+.label{font-size:11px;color:var(--t3);margin-top:2px}
+.cmp{display:inline-flex;align-items:center;gap:4px;font-size:11px;font-weight:500;margin-top:6px;padding:2px 8px;border-radius:4px}
+.cmp.pos{color:var(--green);background:var(--green-bg)}
+.cmp.neg{color:var(--red);background:var(--red-bg)}
+.kpi{text-align:center;padding:16px 10px}
+.kpi .val{font-size:32px;font-weight:700;font-family:'JetBrains Mono',monospace}
+.kpi .lbl{font-size:11px;color:var(--t3);margin-top:4px}
+.kpi .change{font-size:13px;font-weight:600;margin-top:6px}
+.kpi .change.pos{color:var(--green)}.kpi .change.neg{color:var(--red)}
+.cmp-row{display:flex;align-items:center;padding:10px 0;border-bottom:1px solid var(--border);gap:12px}
+.cmp-row:last-child{border-bottom:none}
+.cmp-label{width:100px;font-size:12px;color:var(--t2);flex-shrink:0}
+.cmp-bars{flex:1;display:flex;flex-direction:column;gap:3px}
+.cmp-bar{height:14px;border-radius:3px;position:relative;min-width:2px;transition:width 0.6s}
+.cmp-bar-val{position:absolute;right:6px;top:50%;transform:translateY(-50%);font-size:9px;font-weight:600;color:rgba(0,0,0,0.7)}
+.cmp-change{width:70px;text-align:right;font-size:11px;font-weight:600;flex-shrink:0}
+.stat-row{display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px solid var(--border)}
+.stat-row:last-child{border-bottom:none}
+.stat-label{font-size:12px;color:var(--t2)}
+.stat-value{font-size:12px;font-weight:600;font-family:'JetBrains Mono',monospace}
+.stat-value.good{color:var(--green)}.stat-value.warn{color:var(--orange)}.stat-value.bad{color:var(--red)}
+.chart-wrap{position:relative;padding-left:52px;padding-bottom:4px}
+.chart-wrap .y-axis{position:absolute;left:0;top:0;bottom:24px;display:flex;flex-direction:column;justify-content:space-between;align-items:flex-end;padding-right:6px;width:48px}
+.chart-wrap .y-tick{font-size:11px;color:var(--t2);font-family:'JetBrains Mono',monospace;line-height:1}
+.chart-wrap .y-label{position:absolute;left:0;top:50%;transform:rotate(-90deg) translateX(-50%);transform-origin:0 0;font-size:10px;color:var(--t2);font-family:'JetBrains Mono',monospace;white-space:nowrap;letter-spacing:0.3px}
+.chart-wrap .chart-area{position:relative}
+.chart-wrap .x-labels{display:flex}
+.chart-wrap .gridlines{position:absolute;left:0;right:0;top:0;bottom:0;pointer-events:none;z-index:0}
+.chart-wrap .gridline{position:absolute;left:0;right:0;height:1px;background:rgba(255,255,255,0.06)}
+.mbar{flex:1;border-radius:2px 2px 0 0;min-height:1px;transition:height 0.4s}
+.month-lbl{font-size:11px;color:var(--t2);text-align:center;height:24px;line-height:24px;flex-shrink:0;font-family:'JetBrains Mono',monospace}
+.monthly-stacked{display:flex;align-items:flex-end;gap:3px;height:220px;padding:0;position:relative;z-index:1}
+.month-col{flex:1;display:flex;flex-direction:column;align-items:center;gap:0}
+.month-stack{width:100%;display:flex;flex-direction:column-reverse}
+.month-seg{width:100%;transition:height 0.3s}
+.month-seg:first-child{border-radius:0 0 2px 2px}
+.month-seg:last-child{border-radius:2px 2px 0 0}
+.bar-chart{display:flex;align-items:flex-end;gap:3px;height:220px;padding:0;position:relative;z-index:1}
+.bar-group{flex:1;display:flex;gap:1px;align-items:flex-end;height:100%}
+.bar-group .mbar{min-width:3px}
+.stacked-bar{display:flex;height:20px;border-radius:4px;overflow:hidden;margin:6px 0}
+.stacked-bar .segment{height:100%}
+.bar{height:5px;background:rgba(255,255,255,0.06);border-radius:3px;overflow:hidden;margin-top:6px}
+.bar .fill{height:100%;border-radius:3px;transition:width 0.5s}
+.bar-label{display:flex;justify-content:space-between;font-size:9px;color:var(--t3);margin-bottom:3px}
+.legend-row{display:flex;flex-wrap:wrap;gap:14px;margin-top:10px}
+.legend-item{display:flex;align-items:center;gap:5px;font-size:11px;color:var(--t2)}
+.legend-dot{width:10px;height:10px;border-radius:2px;flex-shrink:0}
+table{width:100%;border-collapse:collapse;font-size:12px}
+th,td{padding:7px 10px;text-align:left;border-bottom:1px solid var(--border)}
+th{font-weight:600;color:var(--t3);font-size:10px;text-transform:uppercase;letter-spacing:0.5px}
+.dot{width:8px;height:8px;border-radius:50%;display:inline-block;margin-right:5px}
+.dot.good{background:var(--green)}.dot.warn{background:var(--orange)}.dot.bad{background:var(--red)}
+.radar-container{display:flex;gap:20px;flex-wrap:wrap;justify-content:center;align-items:flex-start}
+.radar-panel{text-align:center}
+.radar-panel h3{font-size:12px;font-weight:600;color:var(--t2);margin-bottom:8px}
+.radar-legend{display:flex;flex-direction:column;gap:6px;min-width:180px}
+.leg-item{display:flex;align-items:center;gap:8px;padding:5px 8px;border-radius:6px}
+.leg-color{width:8px;height:8px;border-radius:2px;flex-shrink:0}
+.leg-name{flex:1;font-size:11px;color:var(--t2)}
+.leg-score{font-size:12px;font-weight:600;font-family:'JetBrains Mono',monospace}
+
+.std-item{padding:16px;border:1px solid var(--border);border-radius:8px;margin-bottom:10px}
+.std-item.pass{border-left:3px solid var(--green)}
+.std-item.fail{border-left:3px solid var(--red)}
+
+.std-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:6px}
+.std-metric{font-size:14px;font-weight:600}
+.std-standard{font-size:10px;color:var(--t3);font-family:'JetBrains Mono',monospace}
+.std-body{display:flex;align-items:center;gap:16px}
+.std-value{font-size:24px;font-weight:700;font-family:'JetBrains Mono',monospace;min-width:80px}
+.std-bar-wrap{flex:1;display:flex;flex-direction:column;gap:3px}
+.std-bar-track{height:8px;background:rgba(255,255,255,0.06);border-radius:4px;overflow:hidden;position:relative}
+.std-bar-fill{height:100%;border-radius:4px;transition:width 0.6s}
+.std-bar-limit{position:absolute;top:-2px;height:12px;width:2px;background:var(--t1)}
+.std-bar-labels{display:flex;justify-content:space-between;font-size:9px;color:var(--t3)}
+.std-status{font-size:11px;font-weight:600;min-width:70px;text-align:right}
+
+.std-compact{padding:10px 0;border-bottom:1px solid var(--border)}
+.std-compact:last-child{border-bottom:none}
+.print-btn{position:fixed;bottom:20px;right:20px;padding:8px 18px;background:var(--green);color:var(--bg);border:none;border-radius:6px;font-size:11px;font-weight:600;cursor:pointer;font-family:'DM Sans',sans-serif}
+@media print{.tabs,.print-btn{display:none}.section{display:block!important;page-break-inside:avoid}}
+</style>
+</head>
+<body>
+
+<header class="header">
+  <div>
+    <h1><span>GDS</span> Results Comparison</h1>
+    <div class="case-legend">
+      <span><span class="case-dot" style="background:var(--design)"></span>Design Case</span>
+      <span><span class="case-dot" style="background:var(--reference)"></span>Reference Case</span>
+    </div>
+  </div>
+  <div class="meta">
+    <div class="name" id="pName">--</div>
+    <div id="pTime">--</div>
+  </div>
+</header>
+
+<nav class="tabs">
+  <div class="tab active" data-s="overview">Overview</div>
+  <div class="tab" data-s="energy">Energy</div>
+  <div class="tab" data-s="carbon">Carbon &amp; Cost</div>
+  <div class="tab" data-s="hvac">HVAC</div>
+  <div class="tab" data-s="comfort">Comfort</div>
+</nav>
+
+<main class="main">
+
+<!-- ==================== OVERVIEW ==================== -->
+<section id="overview" class="section active">
+  <div class="card" style="margin-bottom:20px">
+    <div class="card-head"><span class="card-title">Performance Polygon — Design vs Reference</span><span class="badge green" id="baselineLabel">Reference = Baseline</span></div>
+    <p style="font-size:11px;color:var(--t2);margin-bottom:16px">Each axis shows a performance metric. The dashed polygon is the reference case (baseline). Outward = improvement relative to reference. Scale: baseline &plusmn;50%.</p>
+    <div style="display:flex;gap:24px;flex-wrap:wrap;justify-content:center;align-items:flex-start">
+      <svg id="polyChart" width="560" height="480"></svg>
+      <div style="flex:1;min-width:280px" id="polyMetrics"></div>
+    </div>
+    <div class="legend-row" style="margin-top:16px;justify-content:center">
+      <span class="legend-item"><span class="legend-dot" style="background:var(--design)"></span>Design Case</span>
+      <span class="legend-item"><span class="legend-dot" style="border:2px dashed var(--reference);background:transparent;width:10px;height:10px"></span>Reference Case (Baseline)</span>
+    </div>
+  </div>
+  <div class="grid-5" id="kpiRow"></div>
+  <div class="card" style="margin-bottom:20px">
+    <div class="card-head"><span class="card-title">Detailed Performance Metrics</span></div>
+    <div id="fullTable"></div>
+  </div>
+  <div class="card" style="margin-bottom:20px">
+    <div class="card-head"><span class="card-title">Performance Metrics Summary</span><span class="badge neutral">Design vs Reference</span></div>
+    <div id="standardsGrid"></div>
+  </div>
+
+</section>
+
+<!-- ==================== ENERGY ==================== -->
+<section id="energy" class="section">
+  <div class="grid-2">
+    <div class="card">
+      <div class="card-head"><span class="card-title">Annual End-Use Energy Comparison</span><span class="badge neutral">MWh by End Use</span></div>
+      <div id="endUseCompare"></div>
+      <div class="legend-row" style="margin-top:14px"><span class="legend-item"><span class="legend-dot" style="background:var(--design)"></span>Design Case</span><span class="legend-item"><span class="legend-dot" style="background:var(--reference)"></span>Reference Case</span></div>
+    </div>
+    <div class="card">
+      <div class="card-head"><span class="card-title">Monthly Total Energy — Design vs Reference</span><span class="badge neutral">kWh/month</span></div>
+      <div class="chart-wrap" id="monthCompareWrap">
+        <div class="y-label">Energy (MWh)</div>
+        <div class="y-axis" id="monthCompareY"></div>
+        <div class="chart-area bar-chart" id="monthCompare"></div>
+      </div>
+      <div class="legend-row"><span class="legend-item"><span class="legend-dot" style="background:var(--design)"></span>Design Case</span><span class="legend-item"><span class="legend-dot" style="background:var(--reference)"></span>Reference Case</span></div>
+    </div>
+  </div>
+  <div class="grid-2">
+    <div class="card">
+      <div class="card-head"><span class="card-title">Design Case — Annual End-Use Breakdown</span><span class="badge green">Design</span></div>
+      <div style="display:flex;justify-content:center"><svg id="pieD" width="180" height="180"></svg></div>
+      <div id="euListD" style="margin-top:12px"></div>
+    </div>
+    <div class="card">
+      <div class="card-head"><span class="card-title">Reference Case — Annual End-Use Breakdown</span><span class="badge blue">Reference</span></div>
+      <div style="display:flex;justify-content:center"><svg id="pieR" width="180" height="180"></svg></div>
+      <div id="euListR" style="margin-top:12px"></div>
+    </div>
+  </div>
+  <div class="grid-2">
+    <div class="card">
+      <div class="card-head"><span class="card-title">Design Case — Energy by Fuel Type</span></div>
+      <div class="stacked-bar" id="fuelBarD"></div>
+      <div class="legend-row" id="fuelLegD"></div>
+      <div style="margin-top:12px">
+        <div class="stat-row"><span class="stat-label">Electricity (MWh)</span><span class="stat-value" id="elecD">--</span></div>
+        <div class="stat-row"><span class="stat-label">Natural Gas (MWh)</span><span class="stat-value" id="gasD">--</span></div>
+        <div class="stat-row"><span class="stat-label">District (MWh)</span><span class="stat-value" id="distD">--</span></div>
+        <div class="stat-row"><span class="stat-label">Total Site Energy (MWh)</span><span class="stat-value" id="totalD">--</span></div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-head"><span class="card-title">Reference Case — Energy by Fuel Type</span></div>
+      <div class="stacked-bar" id="fuelBarR"></div>
+      <div class="legend-row" id="fuelLegR"></div>
+      <div style="margin-top:12px">
+        <div class="stat-row"><span class="stat-label">Electricity (MWh)</span><span class="stat-value" id="elecR">--</span></div>
+        <div class="stat-row"><span class="stat-label">Natural Gas (MWh)</span><span class="stat-value" id="gasR">--</span></div>
+        <div class="stat-row"><span class="stat-label">District (MWh)</span><span class="stat-value" id="distR">--</span></div>
+        <div class="stat-row"><span class="stat-label">Total Site Energy (MWh)</span><span class="stat-value" id="totalR">--</span></div>
+      </div>
+    </div>
+  </div>
+  <div class="grid-2">
+    <div class="card">
+      <div class="card-head"><span class="card-title">Design Case — Monthly End-Use Breakdown</span><span class="badge green">kWh by Category</span></div>
+      <div class="chart-wrap" id="stackedDWrap">
+        <div class="y-label">Energy (MWh)</div>
+        <div class="y-axis" id="stackedDY"></div>
+        <div class="chart-area monthly-stacked" id="stackedD"></div>
+      </div>
+      <div class="legend-row" id="stackedLegD"></div>
+    </div>
+    <div class="card">
+      <div class="card-head"><span class="card-title">Reference Case — Monthly End-Use Breakdown</span><span class="badge blue">kWh by Category</span></div>
+      <div class="chart-wrap" id="stackedRWrap">
+        <div class="y-label">Energy (MWh)</div>
+        <div class="y-axis" id="stackedRY"></div>
+        <div class="chart-area monthly-stacked" id="stackedR"></div>
+      </div>
+      <div class="legend-row" id="stackedLegR"></div>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-head"><span class="card-title">Monthly Heating &amp; Cooling Load Comparison</span><span class="badge neutral">Design vs Reference</span></div>
+    <div class="chart-wrap" id="hcCompareWrap">
+      <div class="y-label">Energy (MWh)</div>
+      <div class="y-axis" id="hcCompareY"></div>
+      <div class="chart-area bar-chart" id="hcCompare"></div>
+    </div>
+    <div class="legend-row">
+      <span class="legend-item"><span class="legend-dot" style="background:var(--orange)"></span>Design Heating</span>
+      <span class="legend-item"><span class="legend-dot" style="background:var(--blue)"></span>Design Cooling</span>
+      <span class="legend-item"><span class="legend-dot" style="background:var(--orange);opacity:0.35"></span>Ref. Heating</span>
+      <span class="legend-item"><span class="legend-dot" style="background:var(--blue);opacity:0.35"></span>Ref. Cooling</span>
+    </div>
+  </div>
+</section>
+
+<!-- ==================== CARBON & COST ==================== -->
+<section id="carbon" class="section">
+  <div class="grid-2">
+    <div class="card">
+      <div class="card-head"><span class="card-title">Annual Carbon Emissions — Design vs Reference</span></div>
+      <div class="grid-2" style="margin:0;gap:20px">
+        <div>
+          <div class="label">Design</div>
+          <div class="metric metric-sm"><span class="val" style="color:var(--design)" id="carbonD">--</span><span class="unit">kg CO2/yr</span></div>
+        </div>
+        <div>
+          <div class="label">Reference</div>
+          <div class="metric metric-sm"><span class="val" style="color:var(--reference)" id="carbonR">--</span><span class="unit">kg CO2/yr</span></div>
+        </div>
+      </div>
+      <div id="carbonCmpBadge" style="margin-top:12px"></div>
+      <div style="margin-top:16px">
+        <div class="stat-row"><span class="stat-label">Design Intensity (kg CO2/m2)</span><span class="stat-value" id="ciD">--</span></div>
+        <div class="stat-row"><span class="stat-label">Reference Intensity (kg CO2/m2)</span><span class="stat-value" id="ciR">--</span></div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-head"><span class="card-title">Annual Energy Cost — Design vs Reference</span></div>
+      <div class="grid-2" style="margin:0;gap:20px">
+        <div>
+          <div class="label">Design</div>
+          <div class="metric metric-sm"><span class="val" style="color:var(--design)" id="costD">--</span><span class="unit">USD/yr</span></div>
+        </div>
+        <div>
+          <div class="label">Reference</div>
+          <div class="metric metric-sm"><span class="val" style="color:var(--reference)" id="costR">--</span><span class="unit">USD/yr</span></div>
+        </div>
+      </div>
+      <div id="savingsBadge" style="margin-top:12px"></div>
+      <div style="margin-top:16px">
+        <div class="stat-row"><span class="stat-label">Design ($/m2)</span><span class="stat-value" id="cpaD">--</span></div>
+        <div class="stat-row"><span class="stat-label">Reference ($/m2)</span><span class="stat-value" id="cpaR">--</span></div>
+      </div>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-head"><span class="card-title">Monthly Energy Cost — Design vs Reference</span><span class="badge neutral">USD/month</span></div>
+    <div class="chart-wrap" id="costCompareWrap">
+      <div class="y-label">Cost (USD)</div>
+      <div class="y-axis" id="costCompareY"></div>
+      <div class="chart-area bar-chart" id="costCompare"></div>
+    </div>
+    <div class="legend-row"><span class="legend-item"><span class="legend-dot" style="background:var(--design)"></span>Design Case</span><span class="legend-item"><span class="legend-dot" style="background:var(--reference)"></span>Reference Case</span></div>
+  </div>
+</section>
+
+<!-- ==================== HVAC ==================== -->
+<section id="hvac" class="section">
+  <div class="grid-2">
+    <div class="card">
+      <div class="card-head"><span class="card-title">Unmet Setpoint Hours — Design Case</span><span class="badge" id="unmetBadgeD">--</span></div>
+      <div class="metric"><span class="val" id="unmetD">--</span><span class="unit">hours</span></div>
+      <div class="bar-label"><span>0</span><span>Threshold: 300 hrs</span></div>
+      <div class="bar"><div class="fill" id="unmetBarD"></div></div>
+      <div style="margin-top:12px">
+        <div class="stat-row"><span class="stat-label">Heating Unmet (hrs)</span><span class="stat-value" id="unmetHD">--</span></div>
+        <div class="stat-row"><span class="stat-label">Cooling Unmet (hrs)</span><span class="stat-value" id="unmetCD">--</span></div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-head"><span class="card-title">Unmet Setpoint Hours — Reference Case</span><span class="badge" id="unmetBadgeR">--</span></div>
+      <div class="metric"><span class="val" id="unmetR">--</span><span class="unit">hours</span></div>
+      <div class="bar-label"><span>0</span><span>Threshold: 300 hrs</span></div>
+      <div class="bar"><div class="fill" id="unmetBarR"></div></div>
+      <div style="margin-top:12px">
+        <div class="stat-row"><span class="stat-label">Heating Unmet (hrs)</span><span class="stat-value" id="unmetHR">--</span></div>
+        <div class="stat-row"><span class="stat-label">Cooling Unmet (hrs)</span><span class="stat-value" id="unmetCR">--</span></div>
+      </div>
+    </div>
+  </div>
+  <div class="grid-2">
+    <div class="card">
+      <div class="card-head"><span class="card-title">HVAC Sizing Adequacy — Design Case</span></div>
+      <div class="stat-row"><span class="stat-label">Heating Capacity (kW)</span><span class="stat-value" id="hCapD">--</span></div>
+      <div class="stat-row"><span class="stat-label">Heating Ratio (cap./peak)</span><span class="stat-value" id="hRatD">--</span></div>
+      <div class="stat-row"><span class="stat-label">Cooling Capacity (kW)</span><span class="stat-value" id="cCapD">--</span></div>
+      <div class="stat-row"><span class="stat-label">Cooling Ratio (cap./peak)</span><span class="stat-value" id="cRatD">--</span></div>
+      <div class="label" style="margin-top:10px;font-size:9px">Ratio = Installed Capacity / Design Peak Load</div>
+    </div>
+    <div class="card">
+      <div class="card-head"><span class="card-title">HVAC Sizing Adequacy — Reference Case</span></div>
+      <div class="stat-row"><span class="stat-label">Heating Capacity (kW)</span><span class="stat-value" id="hCapR">--</span></div>
+      <div class="stat-row"><span class="stat-label">Heating Ratio (cap./peak)</span><span class="stat-value" id="hRatR">--</span></div>
+      <div class="stat-row"><span class="stat-label">Cooling Capacity (kW)</span><span class="stat-value" id="cCapR">--</span></div>
+      <div class="stat-row"><span class="stat-label">Cooling Ratio (cap./peak)</span><span class="stat-value" id="cRatR">--</span></div>
+      <div class="label" style="margin-top:10px;font-size:9px">Ratio = Installed Capacity / Design Peak Load</div>
+    </div>
+  </div>
+</section>
+
+<!-- ==================== COMFORT ==================== -->
+<section id="comfort" class="section">
+  <div class="grid-2">
+    <div class="card">
+      <div class="card-head"><span class="card-title">Zone Thermal Comfort (Fanger PMV/PPD) — Design Case</span><span class="badge green">Avg PPD: <span id="ppdD">--</span>%</span></div>
+      <div style="max-height:400px;overflow-y:auto">
+      <table><thead><tr><th>Zone</th><th>Avg PMV (-)</th><th>Avg PPD (%)</th><th>Comfort%</th><th>Status</th></tr></thead><tbody id="cTableD"></tbody></table>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-head"><span class="card-title">Zone Thermal Comfort (Fanger PMV/PPD) — Reference Case</span><span class="badge blue">Avg PPD: <span id="ppdR">--</span>%</span></div>
+      <div style="max-height:400px;overflow-y:auto">
+      <table><thead><tr><th>Zone</th><th>Avg PMV (-)</th><th>Avg PPD (%)</th><th>Comfort%</th><th>Status</th></tr></thead><tbody id="cTableR"></tbody></table>
+      </div>
+    </div>
+  </div>
+</section>
+
+</main>
+<button class="print-btn" onclick="window.print()">Export</button>
+
+<script>
+const R = {"projectName": "GDS Project", "timestamp": "2026-04-23 20:44:09", "design": {"energy": {"siteEUI": 178.3, "sourceEUI": 564.6, "totalSiteEnergy": 90298, "totalSourceEnergy": 285977, "floorArea": 506.5, "conditionedArea": 506.5, "peakHeating": 29.7, "peakCooling": 0, "endUses": {"heating": 52398, "lighting": 4064, "equipment": 16506, "pumps": 25, "dhw": 17306}, "endUsesElec": {"heating": 52398, "lighting": 4064, "equipment": 16506, "pumps": 25, "dhw": 17306}, "endUsesGas": {"heating": 0, "lighting": 0, "equipment": 0, "pumps": 0, "dhw": 0}, "endUsesDistrict": {"heating": 0, "lighting": 0, "equipment": 0, "pumps": 0, "dhw": 0}, "totalElectricity": 90299, "totalGas": 0, "totalDistrict": 0, "monthlyElec": [14895.51956469928, 14767.246057921253, 14650.07376262061, 7223.303868669185, 3074.577529713536, 532.2202565441256, 306.27332971116476, 1889.7657542509562, 4389.81414569051, 6538.025468315524, 10882.197671708645, 11149.38517016188], "monthlyGas": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], "monthlyByCategory": {"heating": [10967, 9139, 7311, 3046, 609, 0, 0, 0, 609, 3656, 7311, 9748], "lighting": [339, 339, 339, 339, 339, 339, 339, 339, 339, 339, 339, 339], "equipment": [1376, 1376, 1376, 1376, 1376, 1376, 1376, 1376, 1376, 1376, 1376, 1376], "dhw": [1442, 1442, 1442, 1442, 1442, 1442, 1442, 1442, 1442, 1442, 1442, 1442]}, "monthly": {"heating": [10967, 9139, 7311, 3046, 609, 0, 0, 0, 609, 3656, 7311, 9748], "cooling": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]}, "monthlyDistrict": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], "monthlyTotal": [14895.51956469928, 14767.246057921253, 14650.07376262061, 7223.303868669185, 3074.577529713536, 532.2202565441256, 306.27332971116476, 1889.7657542509562, 4389.81414569051, 6538.025468315524, 10882.197671708645, 11149.38517016188], "fuelBreakdown": {"electricity": {"total": 90299, "percentage": 100.0}, "naturalGas": {"total": 0, "percentage": 0.0}, "district": {"total": 0, "percentage": 0.0}}, "unmetHours": {"heating": 15.2, "cooling": 0.0, "total": 15.2, "limit": 300, "compliant": true, "byZone": [{"name": "GDS_DEMO1023TEST_30_FD748310", "heating": 11.3, "cooling": 0.0, "total": 11.3}, {"name": "GDS_DEMO1023TEST_31_7EA5BBDB", "heating": 10.8, "cooling": 0.0, "total": 10.8}, {"name": "GDS_DEMO1023TEST_2_D38FB66D", "heating": 10.0, "cooling": 0.0, "total": 10.0}, {"name": "GDS_DEMO1023TEST_3_E0ABD08D", "heating": 9.3, "cooling": 0.0, "total": 9.3}, {"name": "GDS_DEMO1023TEST_18_9762A422", "heating": 7.8, "cooling": 0.0, "total": 7.8}, {"name": "GDS_DEMO1023TEST_14_F4E742B4", "heating": 7.8, "cooling": 0.0, "total": 7.8}, {"name": "GDS_DEMO1023TEST_10_92EDBE8E", "heating": 7.8, "cooling": 0.0, "total": 7.8}, {"name": "GDS_DEMO1023TEST_22_16B05762", "heating": 7.8, "cooling": 0.0, "total": 7.8}, {"name": "GDS_DEMO1023TEST_26_F06F3DE1", "heating": 7.5, "cooling": 0.0, "total": 7.5}, {"name": "GDS_DEMO1023TEST_6_D25AD4CF", "heating": 7.3, "cooling": 0.0, "total": 7.3}, {"name": "GDS_DEMO1023TEST_23_4A694518", "heating": 7.3, "cooling": 0.0, "total": 7.3}, {"name": "GDS_DEMO1023TEST_11_493B8FA0", "heating": 7.3, "cooling": 0.0, "total": 7.3}, {"name": "GDS_DEMO1023TEST_19_B7978965", "heating": 7.3, "cooling": 0.0, "total": 7.3}, {"name": "GDS_DEMO1023TEST_15_CEFB41C3", "heating": 7.3, "cooling": 0.0, "total": 7.3}, {"name": "GDS_DEMO1023TEST_27_FE3D8328", "heating": 7.2, "cooling": 0.0, "total": 7.2}, {"name": "GDS_DEMO1023TEST_7_8BA10D6E", "heating": 7.0, "cooling": 0.0, "total": 7.0}, {"name": "GDS_DEMO1023TEST_21_9F0C2C63", "heating": 0.7, "cooling": 0.0, "total": 0.7}, {"name": "GDS_DEMO1023TEST_17_F00C75CC", "heating": 0.7, "cooling": 0.0, "total": 0.7}, {"name": "GDS_DEMO1023TEST_13_9CCDC8AD", "heating": 0.7, "cooling": 0.0, "total": 0.7}, {"name": "GDS_DEMO1023TEST_9_1103506F", "heating": 0.7, "cooling": 0.0, "total": 0.7}, {"name": "GDS_DEMO1023TEST_25_AA90156F", "heating": 0.5, "cooling": 0.0, "total": 0.5}, {"name": "GDS_DEMO1023TEST_5_454148BF", "heating": 0.5, "cooling": 0.0, "total": 0.5}, {"name": "GDS_DEMO1023TEST_24_4D4E8CE8", "heating": 0.2, "cooling": 0.0, "total": 0.2}, {"name": "GDS_DEMO1023TEST_16_007EEBD0", "heating": 0.2, "cooling": 0.0, "total": 0.2}, {"name": "GDS_DEMO1023TEST_12_8810B300", "heating": 0.2, "cooling": 0.0, "total": 0.2}, {"name": "GDS_DEMO1023TEST_20_2A3003E4", "heating": 0.2, "cooling": 0.0, "total": 0.2}]}, "hvacSizing": {"heatingEquipment": [], "coolingEquipment": [], "totalHeatingCapacity": 0, "totalCoolingCapacity": 0, "heatingRatio": 0.0, "coolingRatio": 0, "heatingOversized": false, "coolingOversized": false}, "carbon": {"electricity": 11287, "gas": 0, "district": 0, "total": 11287, "intensity": 22.3}, "cost": {"electricity": 14990, "gas": 0, "district": 0, "total": 14990, "perArea": 29.59}, "monthlyCost": {"electricity": [2473, 2451, 2432, 1199, 510, 88, 51, 314, 729, 1085, 1806, 1851], "gas": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], "district": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], "total": [2473, 2451, 2432, 1199, 510, 88, 51, 314, 729, 1085, 1806, 1851]}}, "comfort": {"avgPMV": 0.4, "avgPPD": 18.0, "comfortHours": 7185, "totalOccupiedHours": 8760, "zones": [{"name": "GDS_DEMO1023TEST_10_92EDBE8E_SPACE {AB7B2177-AD39-4897-92F8-6883E7FFD0DD}", "pmv": 0.4, "ppd": 18.0, "comfortPct": 82}, {"name": "GDS_DEMO1023TEST_11_493B8FA0_SPACE {6B9206C7-4351-4A7A-A6B3-3F7F89ABBA4C}", "pmv": 0.54, "ppd": 22.8, "comfortPct": 77}, {"name": "GDS_DEMO1023TEST_12_8810B300_SPACE {4F5736CD-BCA1-48E9-AE2B-9196C0CBEE65}", "pmv": 0.33, "ppd": 15.2, "comfortPct": 85}, {"name": "GDS_DEMO1023TEST_13_9CCDC8AD_SPACE {B12B50DB-79DC-4302-B246-233438003336}", "pmv": 0.45, "ppd": 17.5, "comfortPct": 82}, {"name": "GDS_DEMO1023TEST_14_F4E742B4_SPACE {3C98CAA4-AA7B-42D3-A794-BF74EAB474AC}", "pmv": 0.4, "ppd": 18.1, "comfortPct": 82}, {"name": "GDS_DEMO1023TEST_15_CEFB41C3_SPACE {830ABF93-9D52-4E4C-A803-CD59517F92FA}", "pmv": 0.54, "ppd": 22.8, "comfortPct": 77}, {"name": "GDS_DEMO1023TEST_16_007EEBD0_SPACE {7588EB3B-A2C0-44A2-BFAB-E8994358227F}", "pmv": 0.33, "ppd": 15.3, "comfortPct": 85}, {"name": "GDS_DEMO1023TEST_17_F00C75CC_SPACE {76F49DF7-3AF6-4E84-B04A-DB9C9403A10D}", "pmv": 0.45, "ppd": 17.5, "comfortPct": 82}, {"name": "GDS_DEMO1023TEST_18_9762A422_SPACE {04839370-31B0-401D-A0FB-F7F835355203}", "pmv": 0.4, "ppd": 18.1, "comfortPct": 82}, {"name": "GDS_DEMO1023TEST_19_B7978965_SPACE {778F3C3B-89D6-4AE8-A722-C730E9AC582D}", "pmv": 0.54, "ppd": 22.8, "comfortPct": 77}, {"name": "GDS_DEMO1023TEST_1_D9F25C3E_SPACE {7C7CEA73-3D79-4242-B20F-36032F37D2BF}", "pmv": 0.34, "ppd": 16.4, "comfortPct": 84}, {"name": "GDS_DEMO1023TEST_20_2A3003E4_SPACE {B0D2722E-D886-4067-BD83-5F7DEDE37BB9}", "pmv": 0.33, "ppd": 15.2, "comfortPct": 85}, {"name": "GDS_DEMO1023TEST_21_9F0C2C63_SPACE {F850A2D7-B2B4-4537-A115-48A6A034539A}", "pmv": 0.44, "ppd": 17.3, "comfortPct": 83}, {"name": "GDS_DEMO1023TEST_22_16B05762_SPACE {15DA141E-BA87-4866-A19E-8090A5D1F248}", "pmv": 0.4, "ppd": 17.9, "comfortPct": 82}, {"name": "GDS_DEMO1023TEST_23_4A694518_SPACE {CFC884E0-26D6-43D2-8A2F-6844746D7532}", "pmv": 0.54, "ppd": 22.7, "comfortPct": 77}, {"name": "GDS_DEMO1023TEST_24_4D4E8CE8_SPACE {FCE1AC48-BE73-4413-88F9-1A3F4D3E8D1A}", "pmv": 0.33, "ppd": 15.1, "comfortPct": 85}, {"name": "GDS_DEMO1023TEST_25_AA90156F_SPACE {34A335CE-B845-4CB7-9C59-46ED3BE5A5F8}", "pmv": 0.44, "ppd": 17.2, "comfortPct": 83}, {"name": "GDS_DEMO1023TEST_26_F06F3DE1_SPACE {68B2706C-223D-46A3-9762-9B16F4829385}", "pmv": 0.39, "ppd": 17.7, "comfortPct": 82}, {"name": "GDS_DEMO1023TEST_27_FE3D8328_SPACE {168194DF-57E7-440A-9CF9-F1C795188387}", "pmv": 0.52, "ppd": 22.3, "comfortPct": 78}, {"name": "GDS_DEMO1023TEST_28_A067835B_SPACE {7B82CBA2-01F3-449A-9279-0ADB008D410F}", "pmv": 0.32, "ppd": 14.9, "comfortPct": 85}, {"name": "GDS_DEMO1023TEST_29_CFF00286_SPACE GDS_BATH_PEOPLE", "pmv": 0.3, "ppd": 15.7, "comfortPct": 84}, {"name": "GDS_DEMO1023TEST_2_D38FB66D_SPACE {EF3BC421-C704-4626-BAEC-9C25928D6F59}", "pmv": 0.33, "ppd": 17.2, "comfortPct": 83}, {"name": "GDS_DEMO1023TEST_30_FD748310_SPACE {D1622F4B-F2F4-465F-89D3-A1A3C7EBA8BC}", "pmv": 0.3, "ppd": 16.7, "comfortPct": 83}, {"name": "GDS_DEMO1023TEST_31_7EA5BBDB_SPACE {67D6C319-AAE6-4E7D-B819-BF72303EF9CD}", "pmv": 0.42, "ppd": 20.6, "comfortPct": 79}, {"name": "GDS_DEMO1023TEST_32_F8D69C47_SPACE {29800425-0591-4220-BAFA-48DCC857C252}", "pmv": 0.24, "ppd": 14.2, "comfortPct": 86}, {"name": "GDS_DEMO1023TEST_3_E0ABD08D_SPACE {62821435-11E8-45EE-99EB-6BAC201457A1}", "pmv": 0.44, "ppd": 21.2, "comfortPct": 79}, {"name": "GDS_DEMO1023TEST_4_EC3C371F_SPACE {5AA84A27-0F6E-4D40-938D-E797286FB08F}", "pmv": 0.27, "ppd": 14.7, "comfortPct": 85}, {"name": "GDS_DEMO1023TEST_5_454148BF_SPACE {E1CA86ED-27A9-4D5B-B306-BF2178B7EE94}", "pmv": 0.44, "ppd": 17.4, "comfortPct": 83}, {"name": "GDS_DEMO1023TEST_6_D25AD4CF_SPACE {1790190E-601F-42A2-BBF7-ED18DD4F3300}", "pmv": 0.4, "ppd": 17.9, "comfortPct": 82}, {"name": "GDS_DEMO1023TEST_7_8BA10D6E_SPACE GDS_BED_PEOPLE", "pmv": 0.53, "ppd": 22.5, "comfortPct": 77}, {"name": "GDS_DEMO1023TEST_8_8AE68332_SPACE GDS_LK_PEOPLE", "pmv": 0.33, "ppd": 15.1, "comfortPct": 85}, {"name": "GDS_DEMO1023TEST_9_1103506F_SPACE {5952F623-F157-4F55-B1BB-F11BC4906FC4}", "pmv": 0.44, "ppd": 17.5, "comfortPct": 83}]}, "performance": {"energyCost": {"label": "Energy Cost", "metric": "Energy Cost", "value": 14990, "unit": "$", "connected": true, "note": "Design vs reference comparison"}, "siteEUI": {"label": "Site EUI", "metric": "Site EUI", "value": 178.3, "unit": "kWh/m2/yr", "connected": true, "note": "Relative to reference case"}, "unmetHours": {"label": "Unmet Setpoint Hours", "metric": "Unmet Setpoint Hours", "value": 15.2, "limit": 300, "unit": "hours", "compliant": true, "connected": true, "note": "300 hrs is a common modeling threshold (verify applicability for your project)"}, "thermalComfort": {"label": "Thermal Comfort (PPD)", "metric": "Thermal Comfort (PPD)", "value": 18.0, "limit": 20, "unit": "%", "compliant": true, "connected": true, "zoneCount": 32, "zonesCompliant": 24, "note": "PPD < 10% corresponds to PMV within +/-0.5"}, "hvacSizing": {"label": "HVAC Sizing", "metric": "HVAC Sizing Adequacy", "heatingRatio": 0.0, "coolingRatio": 0, "unit": "capacity/peak", "connected": false, "note": "Ratio of installed capacity to design peak load"}, "carbonIntensity": {"label": "Carbon Intensity", "metric": "Carbon Intensity", "value": 22.3, "total": 11287, "unit": "kg CO2/m2", "connected": true, "note": "Based on user-provided emission factors"}}}, "reference": {"energy": {"siteEUI": 122.3, "sourceEUI": 423.7, "totalSiteEnergy": 61939, "totalSourceEnergy": 214616, "floorArea": 506.5, "conditionedArea": 453.7, "peakHeating": 17.3, "peakCooling": 0, "endUses": {"heating": 25961, "lighting": 4064, "equipment": 16506, "pumps": 25, "dhw": 15383}, "endUsesElec": {"heating": 0, "lighting": 4064, "equipment": 16506, "pumps": 25, "dhw": 0}, "endUsesGas": {"heating": 0, "lighting": 0, "equipment": 0, "pumps": 0, "dhw": 0}, "endUsesDistrict": {"heating": 25961, "lighting": 0, "equipment": 0, "pumps": 0, "dhw": 15383}, "totalElectricity": 20595, "totalGas": 0, "totalDistrict": 41344, "monthlyElec": [1456.0691856621977, 2392.4687661375156, 2627.1942939443984, 2599.376744660476, 837.9785107288236, 7.363280768864952, 7.52853447486641, 1076.576364842907, 2631.66597740756, 2744.333086760382, 2714.8156777605886, 1498.8108019659985], "monthlyGas": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], "monthlyByCategory": {"heating": [5434, 4528, 3622, 1509, 302, 0, 0, 0, 302, 1811, 3622, 4830], "lighting": [339, 339, 339, 339, 339, 339, 339, 339, 339, 339, 339, 339], "equipment": [1376, 1376, 1376, 1376, 1376, 1376, 1376, 1376, 1376, 1376, 1376, 1376], "dhw": [1282, 1282, 1282, 1282, 1282, 1282, 1282, 1282, 1282, 1282, 1282, 1282]}, "monthly": {"heating": [5434, 4528, 3622, 1509, 302, 0, 0, 0, 302, 1811, 3622, 4830], "cooling": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]}, "monthlyDistrict": [7529.5916185620645, 7549.501150830345, 7277.897657444097, 2782.235802929103, 1305.411462813513, 389.9795731722943, 137.7032591119615, 707.5707447162836, 1591.730580530061, 2600.8255219868697, 4655.790298455629, 4816.109494608503], "monthlyTotal": [8985.660804224262, 9941.96991696786, 9905.091951388495, 5381.612547589579, 2143.3899735423365, 397.34285394115926, 145.2317935868279, 1784.1471095591905, 4223.396557937621, 5345.1586087472515, 7370.605976216219, 6314.920296574502], "fuelBreakdown": {"electricity": {"total": 20595, "percentage": 33.3}, "naturalGas": {"total": 0, "percentage": 0.0}, "district": {"total": 41344, "percentage": 66.7}}, "unmetHours": {"heating": 33.5, "cooling": 0.0, "total": 33.5, "limit": 300, "compliant": true, "byZone": [{"name": "GDS_DEMO1023TEST_31_7EA5BBDB", "heating": 19.3, "cooling": 0.0, "total": 19.3}, {"name": "GDS_DEMO1023TEST_30_FD748310", "heating": 19.2, "cooling": 0.0, "total": 19.2}, {"name": "GDS_DEMO1023TEST_3_E0ABD08D", "heating": 18.3, "cooling": 0.0, "total": 18.3}, {"name": "GDS_DEMO1023TEST_23_4A694518", "heating": 17.8, "cooling": 0.0, "total": 17.8}, {"name": "GDS_DEMO1023TEST_27_FE3D8328", "heating": 17.8, "cooling": 0.0, "total": 17.8}, {"name": "GDS_DEMO1023TEST_2_D38FB66D", "heating": 17.8, "cooling": 0.0, "total": 17.8}, {"name": "GDS_DEMO1023TEST_11_493B8FA0", "heating": 17.7, "cooling": 0.0, "total": 17.7}, {"name": "GDS_DEMO1023TEST_7_8BA10D6E", "heating": 17.7, "cooling": 0.0, "total": 17.7}, {"name": "GDS_DEMO1023TEST_26_F06F3DE1", "heating": 17.7, "cooling": 0.0, "total": 17.7}, {"name": "GDS_DEMO1023TEST_19_B7978965", "heating": 17.7, "cooling": 0.0, "total": 17.7}, {"name": "GDS_DEMO1023TEST_15_CEFB41C3", "heating": 17.7, "cooling": 0.0, "total": 17.7}, {"name": "GDS_DEMO1023TEST_18_9762A422", "heating": 17.5, "cooling": 0.0, "total": 17.5}, {"name": "GDS_DEMO1023TEST_14_F4E742B4", "heating": 17.5, "cooling": 0.0, "total": 17.5}, {"name": "GDS_DEMO1023TEST_22_16B05762", "heating": 17.5, "cooling": 0.0, "total": 17.5}, {"name": "GDS_DEMO1023TEST_10_92EDBE8E", "heating": 17.2, "cooling": 0.0, "total": 17.2}, {"name": "GDS_DEMO1023TEST_32_F8D69C47", "heating": 5.2, "cooling": 0.0, "total": 5.2}, {"name": "GDS_DEMO1023TEST_25_AA90156F", "heating": 4.5, "cooling": 0.0, "total": 4.5}, {"name": "GDS_DEMO1023TEST_21_9F0C2C63", "heating": 4.5, "cooling": 0.0, "total": 4.5}, {"name": "GDS_DEMO1023TEST_17_F00C75CC", "heating": 4.5, "cooling": 0.0, "total": 4.5}, {"name": "GDS_DEMO1023TEST_13_9CCDC8AD", "heating": 4.5, "cooling": 0.0, "total": 4.5}, {"name": "GDS_DEMO1023TEST_28_A067835B", "heating": 4.2, "cooling": 0.0, "total": 4.2}, {"name": "GDS_DEMO1023TEST_24_4D4E8CE8", "heating": 3.8, "cooling": 0.0, "total": 3.8}, {"name": "GDS_DEMO1023TEST_20_2A3003E4", "heating": 3.8, "cooling": 0.0, "total": 3.8}, {"name": "GDS_DEMO1023TEST_16_007EEBD0", "heating": 3.7, "cooling": 0.0, "total": 3.7}, {"name": "GDS_DEMO1023TEST_12_8810B300", "heating": 3.3, "cooling": 0.0, "total": 3.3}, {"name": "GDS_DEMO1023TEST_29_CFF00286", "heating": 2.3, "cooling": 0.0, "total": 2.3}, {"name": "GDS_DEMO1023TEST_9_1103506F", "heating": 2.2, "cooling": 0.0, "total": 2.2}, {"name": "GDS_DEMO1023TEST_8_8AE68332", "heating": 1.3, "cooling": 0.0, "total": 1.3}, {"name": "GDS_DEMO1023TEST_1_D9F25C3E", "heating": 0.3, "cooling": 0.0, "total": 0.3}]}, "hvacSizing": {"heatingEquipment": [], "coolingEquipment": [], "totalHeatingCapacity": 0, "totalCoolingCapacity": 0, "heatingRatio": 0.0, "coolingRatio": 0, "heatingOversized": false, "coolingOversized": false}, "carbon": {"electricity": 2574, "gas": 0, "district": 7483, "total": 10058, "intensity": 19.9}, "cost": {"electricity": 3419, "gas": 0, "district": 1654, "total": 5073, "perArea": 10.01}, "monthlyCost": {"electricity": [242, 397, 436, 431, 139, 1, 1, 179, 437, 456, 451, 249], "gas": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], "district": [301, 302, 291, 111, 52, 16, 6, 28, 64, 104, 186, 193], "total": [543, 699, 727, 542, 191, 17, 7, 207, 501, 560, 637, 442]}}, "comfort": {"avgPMV": 0.48, "avgPPD": 19.6, "comfortHours": 7039, "totalOccupiedHours": 8760, "zones": [{"name": "GDS_DEMO1023TEST_10_92EDBE8E_SPACE {74129B76-31AD-4C1D-BDB8-C561F5D325E9}", "pmv": 0.52, "ppd": 20.2, "comfortPct": 80}, {"name": "GDS_DEMO1023TEST_11_493B8FA0_SPACE {2D54BD02-91CA-449B-973F-7A26B137B633}", "pmv": 0.67, "ppd": 25.1, "comfortPct": 75}, {"name": "GDS_DEMO1023TEST_12_8810B300_SPACE {81BCB9BD-DECB-44F7-9D00-1018E6B6B50A}", "pmv": 0.38, "ppd": 14.7, "comfortPct": 85}, {"name": "GDS_DEMO1023TEST_13_9CCDC8AD_SPACE {AB0DC2DD-3D31-40BE-B89E-F3C81A9C0944}", "pmv": 0.52, "ppd": 18.5, "comfortPct": 82}, {"name": "GDS_DEMO1023TEST_14_F4E742B4_SPACE {2BA6F389-BBDF-4F83-A4BC-7B823EEE2862}", "pmv": 0.54, "ppd": 20.3, "comfortPct": 80}, {"name": "GDS_DEMO1023TEST_15_CEFB41C3_SPACE {EC80FB05-7ED8-4D33-B4BB-F6AC2242726E}", "pmv": 0.68, "ppd": 25.2, "comfortPct": 75}, {"name": "GDS_DEMO1023TEST_16_007EEBD0_SPACE {B3FFCA8F-5F97-4490-B4B4-872BB52C2EF6}", "pmv": 0.39, "ppd": 14.7, "comfortPct": 85}, {"name": "GDS_DEMO1023TEST_17_F00C75CC_SPACE {84AD265E-3166-4012-A12B-334A868194C8}", "pmv": 0.52, "ppd": 18.5, "comfortPct": 82}, {"name": "GDS_DEMO1023TEST_18_9762A422_SPACE {295C1FC1-7976-49F6-9690-182AA48B3A10}", "pmv": 0.54, "ppd": 20.3, "comfortPct": 80}, {"name": "GDS_DEMO1023TEST_19_B7978965_SPACE {746506F0-0451-4135-BB45-CD852CFBFF5F}", "pmv": 0.68, "ppd": 25.3, "comfortPct": 75}, {"name": "GDS_DEMO1023TEST_1_D9F25C3E_SPACE {2D0C6E88-5280-40BB-94CB-9266FDA6A8C7}", "pmv": 0.41, "ppd": 17.3, "comfortPct": 83}, {"name": "GDS_DEMO1023TEST_20_2A3003E4_SPACE {E8A4FEAE-DFDE-4F0B-8F1B-4174E5B37068}", "pmv": 0.39, "ppd": 14.8, "comfortPct": 85}, {"name": "GDS_DEMO1023TEST_21_9F0C2C63_SPACE {1BD04332-B436-4E2C-AA2C-F5958FFF26FF}", "pmv": 0.51, "ppd": 18.3, "comfortPct": 82}, {"name": "GDS_DEMO1023TEST_22_16B05762_SPACE {39E29F9F-1046-4191-B2C0-D6CB84CAF1D1}", "pmv": 0.54, "ppd": 20.2, "comfortPct": 80}, {"name": "GDS_DEMO1023TEST_23_4A694518_SPACE {5A898BC7-C031-4682-8769-D808CAAA5B8E}", "pmv": 0.68, "ppd": 25.2, "comfortPct": 75}, {"name": "GDS_DEMO1023TEST_24_4D4E8CE8_SPACE {EBE47156-9DB2-4728-8676-9D5B7A16A016}", "pmv": 0.39, "ppd": 14.7, "comfortPct": 85}, {"name": "GDS_DEMO1023TEST_25_AA90156F_SPACE {77E072D5-5076-4041-A598-1C606BA328F1}", "pmv": 0.51, "ppd": 18.2, "comfortPct": 82}, {"name": "GDS_DEMO1023TEST_26_F06F3DE1_SPACE {91DB3021-4C0E-4B92-BB9F-36A3E4CDEF02}", "pmv": 0.53, "ppd": 19.9, "comfortPct": 80}, {"name": "GDS_DEMO1023TEST_27_FE3D8328_SPACE {2352CF2F-9365-4575-99C3-C17578EE315D}", "pmv": 0.66, "ppd": 24.9, "comfortPct": 75}, {"name": "GDS_DEMO1023TEST_28_A067835B_SPACE {E95AB6CE-6F2B-47F1-9C23-5BECA3E8C75D}", "pmv": 0.38, "ppd": 14.4, "comfortPct": 86}, {"name": "GDS_DEMO1023TEST_29_CFF00286_SPACE GDS_BATH_PEOPLE", "pmv": 0.42, "ppd": 16.8, "comfortPct": 83}, {"name": "GDS_DEMO1023TEST_2_D38FB66D_SPACE {204204E6-7FD5-4493-A3E8-A8F904A0677C}", "pmv": 0.44, "ppd": 19.2, "comfortPct": 81}, {"name": "GDS_DEMO1023TEST_30_FD748310_SPACE {F86BE287-388C-4376-9893-F7D8A0BBF2AC}", "pmv": 0.46, "ppd": 18.7, "comfortPct": 81}, {"name": "GDS_DEMO1023TEST_31_7EA5BBDB_SPACE {EF70A5F5-7A9D-41FA-82FC-471B9C129BCB}", "pmv": 0.59, "ppd": 23.4, "comfortPct": 77}, {"name": "GDS_DEMO1023TEST_32_F8D69C47_SPACE {2CCE3F56-5E98-4D1A-B892-34F393E1793E}", "pmv": 0.32, "ppd": 13.6, "comfortPct": 86}, {"name": "GDS_DEMO1023TEST_3_E0ABD08D_SPACE {F06D013B-A807-4A15-8602-09D9EF3E40ED}", "pmv": 0.58, "ppd": 23.6, "comfortPct": 76}, {"name": "GDS_DEMO1023TEST_4_EC3C371F_SPACE {2DC2D03E-3B26-4C70-9C44-F4B31079E0B1}", "pmv": 0.02, "ppd": 19.6, "comfortPct": 80}, {"name": "GDS_DEMO1023TEST_5_454148BF_SPACE {39494F1D-743F-44CA-8524-B979A538368C}", "pmv": 0.36, "ppd": 19.2, "comfortPct": 81}, {"name": "GDS_DEMO1023TEST_6_D25AD4CF_SPACE {BB572245-352D-4F52-8328-0C6BA5A9E260}", "pmv": 0.21, "ppd": 26.1, "comfortPct": 74}, {"name": "GDS_DEMO1023TEST_7_8BA10D6E_SPACE GDS_BED_PEOPLE", "pmv": 0.66, "ppd": 24.8, "comfortPct": 75}, {"name": "GDS_DEMO1023TEST_8_8AE68332_SPACE GDS_LK_PEOPLE", "pmv": 0.35, "ppd": 14.6, "comfortPct": 85}, {"name": "GDS_DEMO1023TEST_9_1103506F_SPACE {234F85CD-C109-4330-8E51-B6906CDB11A9}", "pmv": 0.5, "ppd": 18.3, "comfortPct": 82}]}, "performance": {"energyCost": {"label": "Energy Cost", "metric": "Energy Cost", "value": 5073, "unit": "$", "connected": true, "note": "Design vs reference comparison"}, "siteEUI": {"label": "Site EUI", "metric": "Site EUI", "value": 122.3, "unit": "kWh/m2/yr", "connected": true, "note": "Relative to reference case"}, "unmetHours": {"label": "Unmet Setpoint Hours", "metric": "Unmet Setpoint Hours", "value": 33.5, "limit": 300, "unit": "hours", "compliant": true, "connected": true, "note": "300 hrs is a common modeling threshold (verify applicability for your project)"}, "thermalComfort": {"label": "Thermal Comfort (PPD)", "metric": "Thermal Comfort (PPD)", "value": 19.6, "limit": 20, "unit": "%", "compliant": true, "connected": true, "zoneCount": 32, "zonesCompliant": 19, "note": "PPD < 10% corresponds to PMV within +/-0.5"}, "hvacSizing": {"label": "HVAC Sizing", "metric": "HVAC Sizing Adequacy", "heatingRatio": 0.0, "coolingRatio": 0, "unit": "capacity/peak", "connected": false, "note": "Ratio of installed capacity to design peak load"}, "carbonIntensity": {"label": "Carbon Intensity", "metric": "Carbon Intensity", "value": 19.9, "total": 10058, "unit": "kg CO2/m2", "connected": true, "note": "Based on user-provided emission factors"}}}, "comparison": {"siteEUI": {"design": 178.3, "reference": 122.3, "diff": 56.0, "pct": 45.8, "improved": false}, "sourceEUI": {"design": 564.6, "reference": 423.7, "diff": 140.9, "pct": 33.3, "improved": false}, "totalSiteEnergy": {"design": 90298, "reference": 61939, "diff": 28359, "pct": 45.8, "improved": false}, "totalElectricity": {"design": 90299, "reference": 20595, "diff": 69704, "pct": 338.5, "improved": false}, "totalGas": {"design": 0, "reference": 0, "diff": 0, "pct": 0, "improved": false}, "totalDistrict": {"design": 0, "reference": 41344, "diff": -41344, "pct": -100.0, "improved": true}, "heating": {"design": 52398, "reference": 25961, "diff": 26437, "pct": 101.8, "improved": false}, "cooling": {"design": 0, "reference": 0, "diff": 0, "pct": 0, "improved": false}, "lighting": {"design": 4064, "reference": 4064, "diff": 0, "pct": 0.0, "improved": false}, "equipment": {"design": 16506, "reference": 16506, "diff": 0, "pct": 0.0, "improved": false}, "fans": {"design": 0, "reference": 0, "diff": 0, "pct": 0, "improved": false}, "dhw": {"design": 17306, "reference": 15383, "diff": 1923, "pct": 12.5, "improved": false}, "carbon": {"design": 11287, "reference": 10058, "diff": 1229, "pct": 12.2, "improved": false}, "carbonIntensity": {"design": 22.3, "reference": 19.9, "diff": 2.4, "pct": 12.1, "improved": false}, "cost": {"design": 14990, "reference": 5073, "diff": 9917, "pct": 195.5, "improved": false}, "ppd": {"design": 18.0, "reference": 19.6, "diff": -1.6, "pct": -8.2, "improved": true}, "unmetHours": {"design": 15.2, "reference": 33.5, "diff": -18.3, "pct": -54.6, "improved": true}, "peakHeating": {"design": 29.7, "reference": 17.3, "diff": 12.4, "pct": 71.7, "improved": false}, "peakCooling": {"design": 0, "reference": 0, "diff": 0, "pct": 0, "improved": false}, "monthlyCostDiff": [1930, 1752, 1705, 657, 319, 71, 44, 107, 228, 525, 1169, 1409], "annualSavings": -9917, "costSavingsPct": -195.5, "carbonReductionPct": -12.2, "euiReductionPct": -45.8}};
+const D = R.design, Rf = R.reference, C = R.comparison;
+const M = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+const MS = M.map(m => m[0]);
+const EU_COLORS = {heating:'#f59e0b',cooling:'#3b82f6',lighting:'#fbbf24',equipment:'#a78bfa',fans:'#64748b',dhw:'#22d3ee',ext_lighting:'#fb923c',pumps:'#94a3b8',heat_rejection:'#f472b6',humidification:'#34d399',refrigeration:'#c084fc'};
+const EU_LABELS = {heating:'Heating',cooling:'Cooling',lighting:'Lighting',equipment:'Equipment',fans:'Fans',dhw:'Hot Water',ext_lighting:'Ext Light',pumps:'Pumps',heat_rejection:'Heat Rej.',humidification:'Humid.',refrigeration:'Refrig.'};
+const CATS = ['heating','cooling','lighting','equipment','fans','dhw'];
+const CHART_H = 220;   // total CSS height of chart containers
+const LABEL_H = 24;    // space for month labels at bottom
+const BAR_H = CHART_H - LABEL_H;  // 196px — actual bar drawing area
+
+document.addEventListener('DOMContentLoaded', () => {
+    document.querySelectorAll('.tab').forEach(t => t.addEventListener('click', () => {
+        document.querySelectorAll('.tab').forEach(x => x.classList.remove('active'));
+        document.querySelectorAll('.section').forEach(x => x.classList.remove('active'));
+        t.classList.add('active');
+        document.getElementById(t.dataset.s).classList.add('active');
+    }));
+    document.getElementById('pName').textContent = R.projectName;
+    document.getElementById('pTime').textContent = R.timestamp;
+    [renderOverview, renderEnergy, renderCarbonCost, renderHVAC, renderComfort].forEach(fn => {
+        try { fn(); } catch(e) { console.error(fn.name + ':', e); }
+    });
+});
+
+function renderYAxis(elId, maxVal, unit, nTicks) {
+    nTicks = nTicks || 5;
+    const el = document.getElementById(elId);
+    const step = niceStep(maxVal, nTicks);
+    const niceMax = Math.ceil(maxVal / step) * step;
+    if (!el) return niceMax;
+    let html = '';
+    for (let i = nTicks; i >= 0; i--) {
+        const v = (niceMax / nTicks) * i;
+        let label;
+        if (unit === 'MWh') label = (v/1000).toFixed(v >= 10000 ? 0 : 1);
+        else if (unit === 'USD') label = '$' + Math.round(v).toLocaleString();
+        else label = v.toFixed(0);
+        html += '<span class="y-tick">' + label + '</span>';
+    }
+    el.innerHTML = html;
+    return niceMax;
+}
+function addGridlines(chartAreaId, nTicks) {
+    nTicks = nTicks || 5;
+    const ca = document.getElementById(chartAreaId);
+    if (!ca) return;
+    ca.style.position = 'relative';
+    let gl = ca.querySelector('.gridlines');
+    if (gl) gl.remove();
+    gl = document.createElement('div');
+    gl.className = 'gridlines';
+    gl.style.cssText = 'position:absolute;left:0;right:0;top:0;bottom:'+LABEL_H+'px;pointer-events:none;z-index:0';
+    let h = '';
+    for (let i = 0; i <= nTicks; i++) h += '<div class="gridline" style="top:'+(i/nTicks*100)+'%"></div>';
+    gl.innerHTML = h;
+    ca.insertBefore(gl, ca.firstChild);
+}
+function niceStep(max, nTicks) {
+    if (max <= 0) return 1;
+    const rough = max / nTicks;
+    const mag = Math.pow(10, Math.floor(Math.log10(rough)));
+    const norm = rough / mag;
+    let nice;
+    if (norm <= 1.5) nice = 1;
+    else if (norm <= 3) nice = 2;
+    else if (norm <= 7) nice = 5;
+    else nice = 10;
+    return nice * mag || 1;
+}
+function getNiceMax(maxVal, nTicks) {
+    nTicks = nTicks || 5;
+    if (maxVal <= 0) return 1;
+    const step = niceStep(maxVal, nTicks);
+    return Math.ceil(maxVal / step) * step;
+}
+
+const CATS_STACKED = ['equipment','lighting','fans','dhw','cooling','heating'];
+
+/* ============ OVERVIEW TAB ============ */
+function renderOverview() {
+    renderPolygon();
+    const kpis = [
+        {label:'Site EUI',val:C.siteEUI.design,unit:'kWh/m2',pct:C.siteEUI.pct,imp:C.siteEUI.improved},
+        {label:'Annual Savings',val:C.annualSavings,unit:'',pct:null,imp:C.annualSavings>=0,fmt:v=>(v>=0?'+':'-')+'$'+Math.abs(v).toLocaleString()},
+        {label:'Carbon',val:C.carbon.design,unit:'kg CO2',pct:C.carbon.pct,imp:C.carbon.improved,fmt:v=>v.toLocaleString()},
+        {label:'Comfort (PPD)',val:C.ppd.design,unit:'%',pct:C.ppd.pct,imp:C.ppd.improved},
+        {label:'Unmet Hours',val:C.unmetHours.design,unit:'hrs',pct:C.unmetHours.pct,imp:C.unmetHours.improved}
+    ];
+    document.getElementById('kpiRow').innerHTML = kpis.map(k => {
+        const cls = k.imp ? 'pos' : 'neg';
+        const arrow = k.imp ? '\u2193' : '\u2191';
+        const valStr = k.fmt ? k.fmt(k.val) : k.val.toFixed(1);
+        const chgStr = k.pct !== null ? (arrow + ' ' + Math.abs(k.pct).toFixed(1) + '%') : '';
+        return '<div class="card kpi"><div class="val">' + valStr + '</div><div class="lbl">' + k.label + (k.unit ? ' (' + k.unit + ')' : '') + '</div>' + (chgStr ? '<div class="change ' + cls + '">' + chgStr + ' vs ref</div>' : '') + '</div>';
+    }).join('');
+
+    const metrics = [
+        ['Site EUI (kWh/m2/yr)','siteEUI','f1'],['Source EUI (kWh/m2/yr)','sourceEUI','f1'],
+        ['Total Energy (kWh)','totalSiteEnergy','comma'],['Electricity (kWh)','totalElectricity','comma'],
+        ['Natural Gas (kWh)','totalGas','comma'],['District (kWh)','totalDistrict','comma'],['Heating (kWh)','heating','comma'],
+        ['Cooling (kWh)','cooling','comma'],['Lighting (kWh)','lighting','comma'],
+        ['Equipment (kWh)','equipment','comma'],['Carbon (kg CO2)','carbon','comma'],
+        ['Carbon Intensity (kg/m2)','carbonIntensity','f1'],['Annual Cost ($)','cost','comma'],
+        ['Comfort (PPD %)','ppd','f1'],['Unmet Hours','unmetHours','f1'],
+        ['Peak Heating (kW)','peakHeating','f1'],['Peak Cooling (kW)','peakCooling','f1']
+    ];
+    function fmtVal(v,f){if(f==='comma')return Math.round(v).toLocaleString();if(f==='f1')return v.toFixed(1);return v}
+    document.getElementById('fullTable').innerHTML = '<table><thead><tr><th>Metric</th><th>Design</th><th>Reference</th><th>Delta vs Baseline</th></tr></thead><tbody>' +
+        metrics.map(([label,key,fmt]) => {
+            const m = C[key]; if(!m) return '';
+            const cls = m.improved ? 'good' : 'bad';
+            const arrow = m.improved ? '\u2193' : '\u2191';
+            return '<tr><td>'+label+'</td><td>'+fmtVal(m.design,fmt)+'</td><td>'+fmtVal(m.reference,fmt)+'</td><td class="stat-value '+cls+'">'+arrow+' '+Math.abs(m.pct).toFixed(1)+'%</td></tr>';
+        }).join('') + '</tbody></table>';
+
+    const dp = D.performance || {};
+    const stdItems = [
+        {metric:'Thermal Comfort (PPD)', note:'PPD < 10% ~ PMV within ±0.5', dVal:C.ppd.design, limit:20, unit:'%',
+         type:'threshold', connected: dp.thermalComfort?.connected || false},
+        {metric:'Unmet Setpoint Hours', note:'Common modeling threshold', dVal:C.unmetHours.design, rVal:C.unmetHours.reference, limit:300, unit:'hours',
+         type:'threshold', connected: true},
+
+    ];
+    document.getElementById('standardsGrid').innerHTML = stdItems.map(item => {
+        if (item.type === 'threshold') {
+            const dOk = item.dVal <= item.limit;
+            const dColor = dOk ? 'var(--green)' : 'var(--red)';
+            const dBarW = Math.min(100, item.dVal / item.limit * 100);
+            let detail = '';
+            if (item.rVal !== undefined) {
+                const rOk = item.rVal <= item.limit;
+                const rBarW = Math.min(100, item.rVal / item.limit * 100);
+                detail = '<div class="std-body" style="margin-top:6px"><span class="std-value" style="color:'+(rOk?'var(--blue)':'var(--red)')+';font-size:18px">'+item.rVal.toFixed(1)+'</span><div class="std-bar-wrap"><div class="std-bar-labels"><span>Reference</span><span></span></div><div class="std-bar-track"><div class="std-bar-fill" style="width:'+rBarW+'%;background:'+(rOk?'var(--reference)':'var(--red)')+'"></div></div></div><span class="std-status" style="color:'+(rOk?'var(--blue)':'var(--red)')+';font-size:11px">'+(rOk?'\u2713 Within threshold':'\u2717 Exceeds threshold')+'</span></div>';
+            }
+            return '<div class="std-item '+(dOk?'pass':'fail')+'"><div class="std-header"><span class="std-metric">'+item.metric+'</span><span class="std-standard" style="font-size:10px;color:var(--t3)">'+item.note+'</span></div><div class="std-body"><span class="std-value" style="color:'+dColor+'">'+item.dVal.toFixed(1)+'</span><div class="std-bar-wrap"><div class="std-bar-labels"><span>Design</span><span>Threshold: '+item.limit+' '+item.unit+'</span></div><div class="std-bar-track"><div class="std-bar-fill" style="width:'+dBarW+'%;background:'+dColor+'"></div></div></div><span class="std-status" style="color:'+dColor+'">'+(dOk?'\u2713 Within threshold':'\u2717 Exceeds threshold')+'</span></div>'+detail+'</div>';
+        }
+        return '';
+    }).join('');
+
+
+}
+
+/* ============ POLYGON CHART ============ */
+function renderPolygon() {
+    const dp = D.performance || {};
+    const axes = [
+        {key:'eui', label:'Site EUI', unit:'kWh/m2/yr',
+         dVal: C.siteEUI.design, rVal: C.siteEUI.reference, lowerBetter: true},
+        {key:'sourceEui', label:'Source EUI', unit:'kWh/m2/yr',
+         dVal: C.sourceEUI.design, rVal: C.sourceEUI.reference, lowerBetter: true},
+        {key:'cost', label:'Energy Cost', unit:'$/yr',
+         dVal: C.cost.design, rVal: C.cost.reference, lowerBetter: true},
+        {key:'carbon', label:'Carbon', unit:'kg CO2/m2',
+         dVal: C.carbonIntensity.design, rVal: C.carbonIntensity.reference, lowerBetter: true},
+        {key:'comfort', label:'Comfort (PPD)', unit:'%',
+         dVal: C.ppd.design, rVal: C.ppd.reference, lowerBetter: true,
+         connected: dp.thermalComfort?.connected},
+        {key:'unmet', label:'Unmet Hours', unit:'hrs',
+         dVal: C.unmetHours.design, rVal: C.unmetHours.reference, lowerBetter: true},
+        {key:'heating', label:'Heating Load', unit:'kWh',
+         dVal: C.heating.design, rVal: C.heating.reference, lowerBetter: true},
+        {key:'cooling', label:'Cooling Load', unit:'kWh',
+         dVal: C.cooling.design, rVal: C.cooling.reference, lowerBetter: true},
+        {key:'peakHeat', label:'Peak Heating', unit:'kW',
+         dVal: C.peakHeating.design, rVal: C.peakHeating.reference, lowerBetter: true},
+        {key:'peakCool', label:'Peak Cooling', unit:'kW',
+         dVal: C.peakCooling.design, rVal: C.peakCooling.reference, lowerBetter: true}
+    ].filter(a => a.connected !== false && a.rVal > 0);
+
+    const n = axes.length;
+    const svg = document.getElementById('polyChart');
+    const cx = 280, cy = 240, maxR = 155, baseR = maxR * 0.55;
+    const minR = maxR * 0.1;
+    svg.innerHTML = '';
+
+    axes.forEach(a => {
+        if (a.rVal === 0) { a.normR = baseR; a.improvePct = 0; return; }
+        const rawImprove = a.lowerBetter ? (a.rVal - a.dVal) / a.rVal : (a.dVal - a.rVal) / a.rVal;
+        a.improvePct = rawImprove * 100;
+        const clamped = Math.max(-0.5, Math.min(0.5, rawImprove));
+        a.normR = baseR + (clamped / 0.5) * (maxR - baseR);
+        if (a.normR < minR) a.normR = minR;
+    });
+
+    [{r:maxR*0.1,l:''},{r:maxR*0.325,l:'-25%'},{r:baseR,l:'Baseline'},{r:maxR*0.775,l:'+25%'},{r:maxR,l:'+50%'}].forEach(ring => {
+        const c = document.createElementNS('http://www.w3.org/2000/svg','circle');
+        c.setAttribute('cx',cx); c.setAttribute('cy',cy); c.setAttribute('r',ring.r);
+        c.setAttribute('fill','none');
+        c.setAttribute('stroke', ring.l==='Baseline' ? 'rgba(96,165,250,0.4)' : 'rgba(255,255,255,0.06)');
+        c.setAttribute('stroke-width', ring.l==='Baseline' ? '2' : '1');
+        if (ring.l==='Baseline') c.setAttribute('stroke-dasharray','6,4');
+        svg.appendChild(c);
+        if (ring.l && ring.l !== 'Baseline') {
+            const t = document.createElementNS('http://www.w3.org/2000/svg','text');
+            t.setAttribute('x', cx + ring.r + 2); t.setAttribute('y', cy - 2);
+            t.setAttribute('font-size','8'); t.setAttribute('fill','rgba(255,255,255,0.2)');
+            t.textContent = ring.l; svg.appendChild(t);
+        }
+    });
+
+    axes.forEach((a, i) => {
+        const angle = -Math.PI/2 + i * (2*Math.PI/n);
+        const line = document.createElementNS('http://www.w3.org/2000/svg','line');
+        line.setAttribute('x1',cx); line.setAttribute('y1',cy);
+        line.setAttribute('x2', cx + maxR * Math.cos(angle));
+        line.setAttribute('y2', cy + maxR * Math.sin(angle));
+        line.setAttribute('stroke','rgba(255,255,255,0.1)'); svg.appendChild(line);
+        const lx = cx + (maxR + 20) * Math.cos(angle);
+        const ly = cy + (maxR + 20) * Math.sin(angle);
+        const txt = document.createElementNS('http://www.w3.org/2000/svg','text');
+        txt.setAttribute('x', lx); txt.setAttribute('y', ly + (Math.sin(angle) > 0.3 ? 12 : Math.sin(angle) < -0.3 ? -4 : 4));
+        txt.setAttribute('text-anchor', Math.abs(Math.cos(angle)) < 0.3 ? 'middle' : Math.cos(angle) > 0 ? 'start' : 'end');
+        txt.setAttribute('font-size','10'); txt.setAttribute('fill','#8b95a8');
+        txt.setAttribute('font-family','DM Sans, sans-serif');
+        txt.textContent = a.label; svg.appendChild(txt);
+    });
+
+    const refPts = axes.map((a,i) => {
+        const angle = -Math.PI/2 + i*(2*Math.PI/n);
+        return {x: cx+baseR*Math.cos(angle), y: cy+baseR*Math.sin(angle)};
+    });
+    const refPoly = document.createElementNS('http://www.w3.org/2000/svg','polygon');
+    refPoly.setAttribute('points', refPts.map(p=>p.x+','+p.y).join(' '));
+    refPoly.setAttribute('fill','rgba(96,165,250,0.06)');
+    refPoly.setAttribute('stroke','#60a5fa'); refPoly.setAttribute('stroke-width','1.5');
+    refPoly.setAttribute('stroke-dasharray','6,3'); svg.appendChild(refPoly);
+
+    const desPts = axes.map((a,i) => {
+        const angle = -Math.PI/2 + i*(2*Math.PI/n);
+        return {x: cx+a.normR*Math.cos(angle), y: cy+a.normR*Math.sin(angle)};
+    });
+    const desPoly = document.createElementNS('http://www.w3.org/2000/svg','polygon');
+    desPoly.setAttribute('points', desPts.map(p=>p.x+','+p.y).join(' '));
+    desPoly.setAttribute('fill','rgba(74,222,128,0.12)');
+    desPoly.setAttribute('stroke','#4ade80'); desPoly.setAttribute('stroke-width','2.5');
+    svg.appendChild(desPoly);
+
+    desPts.forEach((p, i) => {
+        const dot = document.createElementNS('http://www.w3.org/2000/svg','circle');
+        dot.setAttribute('cx',p.x); dot.setAttribute('cy',p.y); dot.setAttribute('r','4');
+        dot.setAttribute('fill', axes[i].improvePct >= 0 ? '#4ade80' : '#f87171');
+        dot.setAttribute('stroke','#fff'); dot.setAttribute('stroke-width','1.5');
+        svg.appendChild(dot);
+        const vt = document.createElementNS('http://www.w3.org/2000/svg','text');
+        const angle = -Math.PI/2 + i*(2*Math.PI/n);
+        const off = axes[i].normR > baseR ? 14 : -14;
+        vt.setAttribute('x', p.x + off*Math.cos(angle)); vt.setAttribute('y', p.y + off*Math.sin(angle)+3);
+        vt.setAttribute('text-anchor','middle'); vt.setAttribute('font-size','9'); vt.setAttribute('font-weight','600');
+        vt.setAttribute('fill', axes[i].improvePct >= 0 ? '#4ade80' : '#f87171');
+        vt.setAttribute('font-family','JetBrains Mono, monospace');
+        vt.textContent = (axes[i].improvePct >= 0 ? '\u2193':'\u2191') + Math.abs(axes[i].improvePct).toFixed(1)+'%';
+        svg.appendChild(vt);
+    });
+
+    document.getElementById('polyMetrics').innerHTML =
+        '<table style="font-size:12px"><thead><tr><th>Metric</th><th>Design</th><th>Ref.</th><th>Delta</th><th>Standard</th></tr></thead><tbody>' +
+        axes.map(a => {
+            const imp = a.improvePct;
+            const cls = imp >= 0 ? 'good' : 'bad';
+            const arrow = imp >= 0 ? '\u2193' : '\u2191';
+            const fmt = v => typeof v === 'number' ? (v >= 1000 ? Math.round(v).toLocaleString() : v.toFixed(1)) : '--';
+            return '<tr><td>'+a.label+' <span style="color:var(--t3)">('+a.unit+')</span></td><td style="font-family:JetBrains Mono,monospace;font-weight:500">'+fmt(a.dVal)+'</td><td style="font-family:JetBrains Mono,monospace;color:var(--t3)">'+fmt(a.rVal)+'</td><td class="stat-value '+cls+'">'+arrow+' '+Math.abs(imp).toFixed(1)+'%</td><td style="color:var(--t3);font-size:10px">'+a.standard+'</td></tr>';
+        }).join('') + '</tbody></table>';
+}
+
+/* ============ ENERGY TAB ============ */
+function renderEnergy() {
+    const endUses = ['heating','cooling','lighting','equipment','fans','dhw'];
+    const de = D.energy.endUses || {}, re = Rf.energy.endUses || {};
+    const maxEU = Math.max(...endUses.map(k => Math.max(de[k]||0, re[k]||0)), 1);
+    document.getElementById('endUseCompare').innerHTML = endUses.map(k => {
+        const dv = de[k]||0, rv = re[k]||0;
+        const dp = dv/maxEU*100, rp = rv/maxEU*100;
+        const diff = rv > 0 ? ((dv-rv)/rv*100) : 0;
+        const cls = diff < 0 ? 'pos' : 'neg';
+        return '<div class="cmp-row"><div class="cmp-label">'+(EU_LABELS[k]||k)+'</div><div class="cmp-bars"><div class="cmp-bar" style="width:'+dp+'%;background:var(--design)"><span class="cmp-bar-val">'+(dv/1000).toFixed(0)+'</span></div><div class="cmp-bar" style="width:'+rp+'%;background:var(--reference)"><span class="cmp-bar-val">'+(rv/1000).toFixed(0)+'</span></div></div><div class="cmp-change '+cls+'">'+(diff<0?'\u2193':'\u2191')+Math.abs(diff).toFixed(0)+'%</div></div>';
+    }).join('');
+
+    let dmt = D.energy.monthlyTotal || [];
+    let rmt = Rf.energy.monthlyTotal || [];
+    if (dmt.length === 0 || dmt.reduce((a,b)=>a+b,0) === 0) {
+        const me = D.energy.monthlyElec || [], mg = D.energy.monthlyGas || [];
+        if (me.length === 12) dmt = me.map((e,i) => e + (mg[i]||0));
+    }
+    if (rmt.length === 0 || rmt.reduce((a,b)=>a+b,0) === 0) {
+        const me = Rf.energy.monthlyElec || [], mg = Rf.energy.monthlyGas || [];
+        if (me.length === 12) rmt = me.map((e,i) => e + (mg[i]||0));
+    }
+    const mxM = Math.max(...dmt, ...rmt, 1);
+    const mcCeil = renderYAxis('monthCompareY', mxM, 'MWh', 5);
+    let mcHtml = '';
+    for (let i = 0; i < 12; i++) {
+        const dPx = Math.round((dmt[i]||0)/mcCeil*BAR_H);
+        const rPx = Math.round((rmt[i]||0)/mcCeil*BAR_H);
+        mcHtml += '<div class="month-col"><div class="bar-group">' +
+            '<div class="mbar" style="height:'+dPx+'px;background:var(--design)"></div>' +
+            '<div class="mbar" style="height:'+rPx+'px;background:var(--reference)"></div>' +
+            '</div><span class="month-lbl">'+M[i]+'</span></div>';
+    }
+    document.getElementById('monthCompare').innerHTML = mcHtml;
+    addGridlines('monthCompare');
+
+    renderPieAndList(D.energy, 'pieD', 'euListD');
+    renderPieAndList(Rf.energy, 'pieR', 'euListR');
+    renderFuel(D.energy, 'fuelBarD', 'fuelLegD', 'elecD', 'gasD', 'distD', 'totalD');
+    renderFuel(Rf.energy, 'fuelBarR', 'fuelLegR', 'elecR', 'gasR', 'distR', 'totalR');
+    renderStacked(D.energy.monthlyByCategory||{}, 'stackedD', 'stackedLegD', 'stackedDY');
+    renderStacked(Rf.energy.monthlyByCategory||{}, 'stackedR', 'stackedLegR', 'stackedRY');
+
+    const dh = D.energy.monthly?.heating || D.energy.monthlyByCategory?.heating || [];
+    const dc = D.energy.monthly?.cooling || D.energy.monthlyByCategory?.cooling || [];
+    const rh = Rf.energy.monthly?.heating || Rf.energy.monthlyByCategory?.heating || [];
+    const rc = Rf.energy.monthly?.cooling || Rf.energy.monthlyByCategory?.cooling || [];
+    const hcMax = Math.max(...dh, ...dc, ...rh, ...rc, 1);
+    const hcCeil = renderYAxis('hcCompareY', hcMax, 'MWh', 5);
+    let hcHtml = '';
+    for (let i = 0; i < 12; i++) {
+        const dhPx = Math.round((dh[i]||0)/hcCeil*BAR_H);
+        const dcPx = Math.round((dc[i]||0)/hcCeil*BAR_H);
+        const rhPx = Math.round((rh[i]||0)/hcCeil*BAR_H);
+        const rcPx = Math.round((rc[i]||0)/hcCeil*BAR_H);
+        hcHtml += '<div class="month-col"><div class="bar-group">'+
+            '<div class="mbar" style="height:'+dhPx+'px;background:var(--orange)"></div>'+
+            '<div class="mbar" style="height:'+dcPx+'px;background:var(--blue)"></div>'+
+            '<div class="mbar" style="height:'+rhPx+'px;background:var(--orange);opacity:0.35"></div>'+
+            '<div class="mbar" style="height:'+rcPx+'px;background:var(--blue);opacity:0.35"></div>'+
+            '</div><span class="month-lbl">'+M[i]+'</span></div>';
+    }
+    document.getElementById('hcCompare').innerHTML = hcHtml;
+    addGridlines('hcCompare');
+}
+
+function renderPieAndList(e, pieId, listId) {
+    if(!e.endUses) return;
+    const total = Object.values(e.endUses).reduce((a,b)=>a+b,0);
+    const svg = document.getElementById(pieId);
+    svg.innerHTML = '';
+    let angle = -Math.PI/2;
+    Object.entries(e.endUses).forEach(([k,v])=>{
+        if(v<=0) return;
+        const pct=v/total;
+        const end=angle+pct*2*Math.PI;
+        const x1=90+70*Math.cos(angle),y1=90+70*Math.sin(angle);
+        const x2=90+70*Math.cos(end),y2=90+70*Math.sin(end);
+        const path=document.createElementNS('http://www.w3.org/2000/svg','path');
+        path.setAttribute('d','M 90 90 L '+x1+' '+y1+' A 70 70 0 '+(pct>0.5?1:0)+' 1 '+x2+' '+y2+' Z');
+        path.setAttribute('fill',EU_COLORS[k]||'#666');
+        path.setAttribute('stroke','#0c1220');path.setAttribute('stroke-width','2');
+        svg.appendChild(path);
+        angle=end;
+    });
+    document.getElementById(listId).innerHTML = Object.entries(e.endUses)
+        .filter(([k,v])=>v>0).sort((a,b)=>b[1]-a[1])
+        .map(([k,v])=>'<div class="stat-row"><span class="stat-label"><span class="legend-dot" style="background:'+(EU_COLORS[k]||'#666')+';display:inline-block;margin-right:6px"></span>'+(EU_LABELS[k]||k)+'</span><span class="stat-value">'+(v/1000).toFixed(1)+' MWh ('+(v/total*100).toFixed(0)+'%)</span></div>').join('');
+}
+
+function renderFuel(e, barId, legId, elId, gasId, distId, totId) {
+    const fb = e.fuelBreakdown||{};
+    const ep = fb.electricity?.percentage||0, gp = fb.naturalGas?.percentage||0, dp = fb.district?.percentage||0;
+    let barHtml = '<div class="segment" style="width:'+ep+'%;background:var(--orange)"></div>';
+    if (gp > 0) barHtml += '<div class="segment" style="width:'+gp+'%;background:var(--purple)"></div>';
+    if (dp > 0) barHtml += '<div class="segment" style="width:'+dp+'%;background:#22d3ee"></div>';
+    document.getElementById(barId).innerHTML = barHtml;
+    let legHtml = '<span class="legend-item"><span class="legend-dot" style="background:var(--orange)"></span>Elec '+ep+'%</span>';
+    if (gp > 0) legHtml += '<span class="legend-item"><span class="legend-dot" style="background:var(--purple)"></span>Gas '+gp+'%</span>';
+    if (dp > 0) legHtml += '<span class="legend-item"><span class="legend-dot" style="background:#22d3ee"></span>District '+dp+'%</span>';
+    document.getElementById(legId).innerHTML = legHtml;
+    document.getElementById(elId).textContent = (e.totalElectricity/1000).toFixed(1);
+    document.getElementById(gasId).textContent = (e.totalGas/1000).toFixed(1);
+    document.getElementById(distId).textContent = (e.totalDistrict/1000).toFixed(1);
+    document.getElementById(totId).textContent = (e.totalSiteEnergy/1000).toFixed(1);
+}
+
+function renderStacked(mbc, chartId, legId, yAxisId) {
+    const cats = CATS_STACKED;
+    let maxT=0;
+    for(let i=0;i<12;i++){let t=0;cats.forEach(c=>{t+=(mbc[c]?.[i]||0)});maxT=Math.max(maxT,t)}
+    const ceil = yAxisId ? renderYAxis(yAxisId, maxT, 'MWh', 5) : (getNiceMax(maxT, 5));
+    document.getElementById(chartId).innerHTML = M.map((m,i)=>{
+        let segs='';
+        cats.forEach(c=>{
+            const v=mbc[c]?.[i]||0;
+            const h=ceil>0?(v/ceil*BAR_H):0;
+            if(h>0.5)segs+='<div class="month-seg" style="height:'+h.toFixed(1)+'px;background:'+(EU_COLORS[c]||'#666')+'"></div>';
+        });
+        return '<div class="month-col"><div class="month-stack">'+segs+'</div><span class="month-lbl">'+m+'</span></div>';
+    }).join('');
+    addGridlines(chartId);
+    document.getElementById(legId).innerHTML = cats.slice().reverse().map(c=>'<span class="legend-item"><span class="legend-dot" style="background:'+(EU_COLORS[c]||'#666')+'"></span>'+(EU_LABELS[c]||c)+'</span>').join('');
+}
+
+/* ============ CARBON & COST TAB ============ */
+function renderCarbonCost() {
+    const dc=D.energy.carbon||{}, rc=Rf.energy.carbon||{};
+    const dco=D.energy.cost||{}, rco=Rf.energy.cost||{};
+    document.getElementById('carbonD').textContent = (dc.total||0).toLocaleString();
+    document.getElementById('carbonR').textContent = (rc.total||0).toLocaleString();
+    document.getElementById('ciD').textContent = (dc.intensity||0).toFixed(1);
+    document.getElementById('ciR').textContent = (rc.intensity||0).toFixed(1);
+    const cImp = C.carbon.improved;
+    document.getElementById('carbonCmpBadge').innerHTML = '<span class="cmp '+(cImp?'pos':'neg')+'">'+(cImp?'\u2193':'\u2191')+' '+Math.abs(C.carbon.pct).toFixed(1)+'% vs reference</span>';
+    document.getElementById('costD').textContent = '$'+(dco.total||0).toLocaleString();
+    document.getElementById('costR').textContent = '$'+(rco.total||0).toLocaleString();
+    document.getElementById('cpaD').textContent = (dco.perArea||0).toFixed(2);
+    document.getElementById('cpaR').textContent = (rco.perArea||0).toFixed(2);
+    const sav = C.annualSavings;
+    document.getElementById('savingsBadge').innerHTML = '<span class="cmp '+(sav>=0?'pos':'neg')+'">'+(sav>=0?'Savings: +$':'Extra cost: -$')+Math.abs(sav).toLocaleString()+'/yr</span>';
+
+    const dmc=D.energy.monthlyCost?.total||[], rmc=Rf.energy.monthlyCost?.total||[];
+    const mxC=Math.max(...dmc,...rmc,1);
+    const costCeil = renderYAxis('costCompareY', mxC, 'USD', 5);
+    let costHtml = '';
+    for (let i = 0; i < 12; i++) {
+        const dPx = Math.round((dmc[i]||0)/costCeil*BAR_H);
+        const rPx = Math.round((rmc[i]||0)/costCeil*BAR_H);
+        costHtml += '<div class="month-col"><div class="bar-group">' +
+            '<div class="mbar" style="height:'+dPx+'px;background:var(--design)"></div>' +
+            '<div class="mbar" style="height:'+rPx+'px;background:var(--reference)"></div>' +
+            '</div><span class="month-lbl">' + M[i] + '</span></div>';
+    }
+    document.getElementById('costCompare').innerHTML = costHtml;
+    addGridlines('costCompare');
+}
+
+/* ============ HVAC TAB ============ */
+function renderHVAC() {
+    renderUnmet(D.energy, 'unmetD', 'unmetBarD', 'unmetBadgeD', 'unmetHD', 'unmetCD');
+    renderUnmet(Rf.energy, 'unmetR', 'unmetBarR', 'unmetBadgeR', 'unmetHR', 'unmetCR');
+    renderSizing(D.energy.hvacSizing||{}, 'hCapD', 'hRatD', 'cCapD', 'cRatD');
+    renderSizing(Rf.energy.hvacSizing||{}, 'hCapR', 'hRatR', 'cCapR', 'cRatR');
+}
+
+function renderUnmet(e, totalId, barId, badgeId, hId, cId) {
+    const u = e.unmetHours||{};
+    document.getElementById(totalId).textContent = (u.total||0).toFixed(0);
+    const pct = Math.min(100,(u.total||0)/300*100);
+    const el = document.getElementById(barId);
+    el.style.width = pct+'%';
+    el.style.background = u.compliant ? 'var(--green)' : 'var(--red)';
+    const bg = document.getElementById(badgeId);
+    bg.textContent = u.compliant ? 'Within Threshold' : 'Exceeds Threshold';
+    bg.className = 'badge '+(u.compliant?'green':'red');
+    document.getElementById(hId).textContent = (u.heating||0).toFixed(0);
+    document.getElementById(cId).textContent = (u.cooling||0).toFixed(0);
+}
+
+function renderSizing(h, hCapId, hRatId, cCapId, cRatId) {
+    document.getElementById(hCapId).textContent = (h.totalHeatingCapacity||0).toFixed(1);
+    document.getElementById(cCapId).textContent = (h.totalCoolingCapacity||0).toFixed(1);
+    const hr=h.heatingRatio||0, cr=h.coolingRatio||0;
+    const hEl=document.getElementById(hRatId), cEl=document.getElementById(cRatId);
+    hEl.textContent = hr.toFixed(2);
+    hEl.className = 'stat-value '+(hr>1.3?'warn':hr<1.0?'bad':'good');
+    cEl.textContent = cr.toFixed(2);
+    cEl.className = 'stat-value '+(cr>1.3?'warn':cr<1.0?'bad':'good');
+}
+
+/* ============ COMFORT TAB ============ */
+function renderComfort() {
+    renderComfortTable(D.comfort, 'cTableD', 'ppdD');
+    renderComfortTable(Rf.comfort, 'cTableR', 'ppdR');
+}
+
+function renderComfortTable(c, tableId, ppdId) {
+    document.getElementById(ppdId).textContent = (c?.avgPPD||0).toFixed(1);
+    const tb = document.getElementById(tableId);
+    if(c?.zones?.length){
+        tb.innerHTML = c.zones.map(z=>{
+            const st = z.ppd<=10?'good':z.ppd<=15?'warn':'bad';
+            return '<tr><td>'+z.name+'</td><td>'+z.pmv.toFixed(2)+'</td><td>'+z.ppd.toFixed(1)+'%</td><td>'+(z.comfortPct||'--')+'%</td><td><span class="dot '+st+'"></span>'+(st==='good'?'OK':st==='warn'?'Marginal':'Poor')+'</td></tr>';
+        }).join('');
+    } else {
+        tb.innerHTML = '<tr><td colspan="5" style="color:var(--t3)">No comfort data</td></tr>';
+    }
+}
+</script>
+</body>
+</html>
