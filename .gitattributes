@@ -1,8 +1,0 @@
-# Exclude example/demo HTML from language stats
-examples/*       linguist-documentation
-docs/*           linguist-documentation
-*.html           linguist-vendored
-
-# Make sure Python is counted normally (this is the default,
-# but explicit doesn't hurt)
-*.py             linguist-detectable
