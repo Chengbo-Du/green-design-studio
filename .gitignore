@@ -51,3 +51,5 @@ Thumbs.db
 
 # config file
 config.json
+install.spec
+weather_index.json
