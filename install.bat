@@ -1,14 +1,15 @@
 @echo off
 title GDS Installer
 echo.
-echo ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+echo ----------------------------------------
 echo   Green Design Studio Installer
-echo ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+echo ----------------------------------------
 echo.
 
 REM Try python on PATH first
 python --version >nul 2>&1
 if %errorlevel% == 0 (
+    echo Found Python on PATH
     python install.py
     goto end
 )
@@ -16,34 +17,36 @@ if %errorlevel% == 0 (
 REM Try py launcher
 py --version >nul 2>&1
 if %errorlevel% == 0 (
+    echo Found Python via py launcher
     py install.py
     goto end
 )
 
-REM Try Ladybug Tools Python directly
-if exist "%USERPROFILE%\ladybug_tools\python\python.exe" (
-    "%USERPROFILE%\ladybug_tools\python\python.exe" install.py
-    goto end
-)
-
-REM Try common Python locations
+REM Search AppData using USERPROFILE (handles domain accounts)
 setlocal enabledelayedexpansion
 for %%V in (313 312 311 310 39) do (
     set PY=%USERPROFILE%\AppData\Local\Programs\Python\Python%%V\python.exe
     if exist "!PY!" (
+        echo Found Python %%V
         "!PY!" install.py
         goto end
     )
 )
 
+REM Try Microsoft Store Python
+set WSPY=%LOCALAPPDATA%\Microsoft\WindowsApps\python.exe
+if exist "%WSPY%" (
+    echo Found Python in WindowsApps
+    "%WSPY%" install.py
+    goto end
+)
+
 REM Nothing found
-echo ❌ Python not found on this computer
 echo.
-echo Please install Python first:
-echo 1. Go to python.org/downloads
-echo 2. Download Python 3.9 or newer
-echo 3. During install CHECK "Add Python to PATH"
-echo 4. Run install.bat again
+echo Python not found on this machine.
+echo Please install Python 3.9+ from python.org
+echo During install, CHECK "Add Python to PATH"
+echo Then run install.bat again.
 echo.
 
 :end

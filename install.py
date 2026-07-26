@@ -47,6 +47,12 @@ GDS_BASE_LOCATIONS = [
     "",
 ]
 
+# Use USERPROFILE for domain account compatibility
+# Falls back to C:\Users\<username> if not set
+USERNAME     = os.environ.get("USERNAME", "")
+USER_PROFILE = os.environ.get("USERPROFILE",
+               os.path.join("C:\\Users", USERNAME))
+
 
 # ── Admin ────────────────────────────────────────────────────────────────────
 
@@ -84,21 +90,22 @@ def _is_gds_root(path):
             os.path.exists(os.path.join(path, "case-study")))
 
 def find_gds_root():
+    # Primary: install.exe lives inside the GDS folder
     script_dir = os.path.dirname(os.path.abspath(__file__))
     if _is_gds_root(script_dir):
         return script_dir
 
-    username = os.environ.get("USERNAME", "")
-    user_root = f"C:\\Users\\{username}"
-
+    # Fallback: search common locations using USERPROFILE
     for base in GDS_BASE_LOCATIONS:
         for name in GDS_FOLDER_NAMES:
-            path = os.path.join(user_root, base, name) if base else os.path.join(user_root, name)
+            path = os.path.join(USER_PROFILE, base, name) if base \
+                   else os.path.join(USER_PROFILE, name)
             if _is_gds_root(path):
                 return path
 
+    # Last resort: scan common folders for any GDS-like folder
     for base in ["Downloads", "Documents", "Desktop"]:
-        base_path = os.path.join(user_root, base)
+        base_path = os.path.join(USER_PROFILE, base)
         if os.path.exists(base_path):
             try:
                 for folder in os.listdir(base_path):
@@ -114,6 +121,7 @@ def find_gds_root():
 # ── Ladybug Tools ────────────────────────────────────────────────────────────
 
 def _find_energyplus(lbt_root):
+    # Ladybug-managed install
     try:
         for folder in os.listdir(lbt_root):
             if "openstudio" in folder.lower():
@@ -123,22 +131,25 @@ def _find_energyplus(lbt_root):
     except:
         pass
 
+    # Standalone installs
     for v in ["24-2-0", "24-1-0", "25-1-0", "26-1-0"]:
         p = f"C:\\EnergyPlusV{v}"
         if os.path.exists(p):
             return p
 
+    # Scan C:\ as last resort
     try:
         for folder in os.listdir("C:\\"):
-            if "EnergyPlus" in folder and os.path.isdir(os.path.join("C:\\", folder)):
+            if "EnergyPlus" in folder and os.path.isdir(
+                    os.path.join("C:\\", folder)):
                 return os.path.join("C:\\", folder)
     except:
         pass
     return None
 
 def find_ladybug():
-    username = os.environ.get("USERNAME", "")
-    lbt_root = os.path.join("C:\\Users", username, "ladybug_tools")
+    # Use USERPROFILE for domain account compatibility
+    lbt_root = os.path.join(USER_PROFILE, "ladybug_tools")
 
     if not os.path.exists(lbt_root):
         return None, None, None
@@ -170,6 +181,7 @@ def check_energyplus_version(ep_path):
 # ── CONTAM ───────────────────────────────────────────────────────────────────
 
 def find_contam():
+    # Registry lookup
     try:
         import winreg
         key = winreg.OpenKey(
@@ -195,6 +207,7 @@ def find_contam():
     except:
         pass
 
+    # Filesystem fallback
     for base in ["C:\\Program Files (x86)\\NIST", "C:\\Program Files\\NIST"]:
         if os.path.exists(base):
             for folder in os.listdir(base):
@@ -214,11 +227,13 @@ def download_contam(dest_folder):
     installer_path = os.path.join(dest_folder, CONTAM_EXE_NAME)
     info("Downloading CONTAM 3.4 from NIST (~6 MB)...")
 
-    # NIST server requires a browser-like User-Agent or it blocks the request
+    # NIST server requires browser-like User-Agent or it blocks the request
     request = urllib.request.Request(
         CONTAM_URL,
         headers={
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                          "AppleWebKit/537.36 (KHTML, like Gecko) "
+                          "Chrome/120.0.0.0 Safari/537.36"
         }
     )
 
@@ -255,7 +270,7 @@ def install_contam():
         info(f"Download: {CONTAM_URL}")
         return None
     except urllib.error.URLError as e:
-        err(f"Could not download CONTAM — {e.reason}")
+        err(f"Could not download CONTAM: {e.reason}")
         info(f"Manual download: {CONTAM_URL}")
         return None
     except subprocess.TimeoutExpired:
@@ -272,20 +287,22 @@ def install_contam():
 
 
 # ── Python ───────────────────────────────────────────────────────────────────
-# CONTAM scripts (gds_contam_v3.py, gds_contam_viewer.py) use stdlib only
-# Any Python 3.9+ works — no specific version or packages required
+# CONTAM scripts use stdlib only — any Python 3.9+ works
 
 def find_python():
-    username = os.environ.get("USERNAME", "")
+    # Use USERPROFILE for domain account compatibility
     candidates = [
-        os.path.join("C:\\Users", username, "ladybug_tools", "python", "python.exe"),
-        *[os.path.join("C:\\Users", username, "AppData", "Local", "Programs",
+        *[os.path.join(USER_PROFILE, "AppData", "Local", "Programs",
                        "Python", f"Python{v}", "python.exe")
           for v in ["313", "312", "311", "310", "39"]],
+        os.path.join(
+            os.environ.get("LOCALAPPDATA", ""),
+            "Microsoft", "WindowsApps", "python.exe"
+        ),
         "C:\\Windows\\py.exe",
     ]
     for path in candidates:
-        if os.path.exists(path):
+        if path and os.path.exists(path):
             return path
     return None
 
@@ -313,6 +330,7 @@ def write_config(gds_root, contam_exe, python_exe):
 def main():
     header("GDS Installer")
     info("Admin privileges active")
+    info(f"User profile: {USER_PROFILE}")
     info("Required: LBT 1.9+ | EnergyPlus 24.2+ | OpenStudio 3.9+ | CONTAM 3.4+ | Python 3.9+")
 
     errors, warnings = [], []
@@ -333,7 +351,6 @@ def main():
         ok("Weather file found")
     else:
         warn(f"Weather file missing: {EPW_FILENAME}")
-        info("Add the .epw file to case-study/")
         warnings.append("EPW file missing")
 
     # Ladybug + EnergyPlus
@@ -353,7 +370,6 @@ def main():
             ok(f"EnergyPlus 24.2+: {ep_path}")
         else:
             warn(f"EnergyPlus version may be below 24.2: {ep_path}")
-            info("Reinstall Ladybug Tools 1.9 to get EnergyPlus 24.2")
             warnings.append("EnergyPlus version may be too old")
     else:
         err("EnergyPlus not found")
